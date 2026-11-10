@@ -116,3 +116,5 @@ covers everything, currently clean) after touching those.
   cycle; the MSE transport is rejected in `SPEC.md`, and the rule they teach is that the stick
   never *encodes*. Hardware results live in `docs/manual-tests.md`, and the probe page at `/probe`
   puts both risky checks (4b, 6) behind a second confirming click.
+
+* Sempre Responda em Português Brasileiro 

@@ -395,7 +395,7 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
   }
 
   return (
-    <div className="watch" ref={shellRef}>
+    <div className="watch" ref={shellRef} data-fullscreen={fullscreen} >
       <video ref={videoRef} className="watch-video" autoPlay playsInline muted={muted} />
 
       {!hasStream && (

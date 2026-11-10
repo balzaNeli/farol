@@ -32,7 +32,8 @@ const MIME: Record<string, string> = {
 
 // The viewer never fetches anything but its own bundle, and it needs no camera or microphone.
 // media-src blob: is for the probe page's loopback test, which plays from an object URL.
-const CSP = "default-src 'self'; connect-src 'self' ws:; img-src 'self' data:; media-src blob:; object-src 'none'; base-uri 'none'; form-action 'self'";
+// Adding frame-ancestors, Permissions-Policy, and CORP for defense-in-depth.
+const CSP = "default-src 'self'; connect-src 'self' ws:; img-src 'self' data:; media-src blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; Permissions-Policy: camera=(), microphone=(), display-capture=(), geolocation=(); Cross-Origin-Resource-Policy: same-origin";
 
 /** Diagnostic pages served from docs/. Fixed names only — no path arithmetic, nothing to escape. */
 const PROBE_FILES: Record<string, string> = {
@@ -122,10 +123,15 @@ async function handlePair(
   res: ServerResponse,
   pairing: Pairing,
 ): Promise<void> {
+  // Accept if no Origin (e.g. curl, test tools); require same-origin when present.
+  const origin = req.headers["origin"];
+  if (origin !== undefined && origin !== `http://${req.headers.host}`) {
+    return sendJson(res, 403, { error: "origin_not_allowed" });
+  }
   const pin = pinFrom(await readJson(req, MAX_BODY_BYTES));
   if (pin === null) return sendJson(res, 400, { error: "bad_request" });
 
-  const result = pairing.verify(pin);
+  const result = pairing.verify(pin, req.socket.remoteAddress);
   switch (result.kind) {
     case "paired":
       return sendJson(res, 200, { token: result.token });
