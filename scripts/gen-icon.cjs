@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const zlib = require("node:zlib");
 
-// Implementação simples de CRC-32 (mesmo polinômio usado pelo PNG)
+// ---------- CRC-32 ----------
 const crcTable = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {
   let c = n;
@@ -18,23 +18,19 @@ function crc32(buf) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-// ---------- gerar um PNG quadrado de qualquer tamanho ----------
+// ---------- gerar PNG ----------
 function makePng(size) {
   const cx = size / 2;
   const cy = size / 2;
   const r = size * 0.35;
-
-  const rowBytes = 1 + size * 4; // 1 byte de filtro + 4 bytes por pixel
+  const rowBytes = 1 + size * 4;
   const raw = Buffer.alloc(size * rowBytes);
-
   for (let y = 0; y < size; y++) {
     const rowOffset = y * rowBytes;
-    raw[rowOffset] = 0; // filtro "none"
+    raw[rowOffset] = 0;
     for (let x = 0; x < size; x++) {
       const pxOffset = rowOffset + 1 + x * 4;
-      const dx = x - cx;
-      const dy = y - cy;
-      const d = Math.sqrt(dx * dx + dy * dy);
+      const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
       if (d < r) {
         raw[pxOffset] = 0xff; raw[pxOffset + 1] = 0xff; raw[pxOffset + 2] = 0xff; raw[pxOffset + 3] = 0xff;
       } else {
@@ -42,67 +38,76 @@ function makePng(size) {
       }
     }
   }
-
   const compressed = zlib.deflateRawSync(raw);
-
   function chunk(type, data) {
     const len = Buffer.alloc(4);
     len.writeUInt32BE(data.length, 0);
     const typeBuf = Buffer.from(type, "ascii");
-    const crcInput = Buffer.concat([typeBuf, data]);
     const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(crcInput), 0);
+    crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
     return Buffer.concat([len, typeBuf, data, crc]);
   }
-
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8;   // bit depth
-  ihdr[9] = 6;   // color type = RGBA
-  ihdr[10] = 0;  // compression
-  ihdr[11] = 0;  // filter
-  ihdr[12] = 0;  // interlace
-
+  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", compressed),
-    chunk("IEND", Buffer.alloc(0)),
+    chunk("IHDR", ihdr), chunk("IDAT", compressed), chunk("IEND", Buffer.alloc(0)),
   ]);
 }
 
-// Tamanhos para o ICO (Windows exige múltiplos tamanhos para ser válido)
-const sizes = [16, 32, 48, 256];
-const images = sizes.map((s) => ({ size: s, png: makePng(s) }));
+const size = 256;
+fs.writeFileSync("build/farol-256.png", makePng(size));
+console.log("build/farol-256.png saved");
 
-// ---------- montar ICO ----------
-let offset = 6 + sizes.length * 16; // cabeçalho + todas as entradas de diretório
+// ---------- gerar ICO com um único tamanho (BMP nativo) ----------
+const cx = size / 2;
+const cy = size / 2;
+const r = size * 0.35;
 
-const header = Buffer.alloc(6);
-header.writeUInt16LE(0, 0);     // reserved
-header.writeUInt16LE(1, 2);     // type = 1 (icon)
-header.writeUInt16LE(1, sizes.length); // count
+const maskRowBytes = Math.floor((size + 31) / 32) * 4;
+const maskData = Buffer.alloc(maskRowBytes * size, 0x00);
 
-const entries = [];
-for (const { size, png } of images) {
-  const entry = Buffer.alloc(16);
-  entry[0] = size >= 256 ? 0 : size; // width (0 = 256)
-  entry[1] = size >= 256 ? 0 : size; // height (0 = 256)
-  entry[2] = 0;                      // color count
-  entry[3] = 0;                      // reserved
-  entry.writeUInt16LE(0, 4);         // color planes
-  entry.writeUInt16LE(32, 6);        // bits per pixel
-  entry.writeUInt32LE(png.length, 8); // size of image data
-  entry.writeUInt32LE(offset, 12);   // offset of image data
-  entries.push(entry);
-  offset += png.length;
+const xorRowBytes = size * 4;
+const xorData = Buffer.alloc(xorRowBytes * size);
+for (let y = 0; y < size; y++) {
+  for (let x = 0; x < size; x++) {
+    const offset = y * xorRowBytes + x * 4;
+    const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+    if (d < r) {
+      xorData[offset] = 0xff; xorData[offset + 1] = 0xff; xorData[offset + 2] = 0xff; xorData[offset + 3] = 0xff;
+    } else {
+      xorData[offset] = 0x15; xorData[offset + 1] = 0x8a; xorData[offset + 2] = 0xff; xorData[offset + 3] = 0xff;
+    }
+  }
 }
 
-const ico = Buffer.concat([header, ...entries, ...images.map((i) => i.png)]);
-fs.writeFileSync("build/farol.ico", ico);
-console.log("build/farol.ico created", ico.length, "bytes", "sizes:", sizes.join(","));
+const bmih = Buffer.alloc(40);
+bmih.writeUInt32LE(40, 0);
+bmih.writeUInt32LE(size, 4);
+bmih.writeUInt32LE(size * 2, 8);
+bmih.writeUInt16LE(1, 12);
+bmih.writeUInt16LE(32, 14);
+bmih.writeUInt32LE(0, 16);
+bmih.writeUInt32LE(0, 20);
 
-// também salva o PNG maior para referência
-fs.writeFileSync("build/farol-256.png", images.find((i) => i.size === 256).png);
-console.log("build/farol-256.png saved");
+// ICO header (6 bytes)
+const header = Buffer.alloc(6);
+header.writeUInt16LE(0, 0); // reserved
+header.writeUInt16LE(1, 2); // type = 1
+header.writeUInt16LE(1, 1); // count = 1
+
+// ICONDIRENTRY (16 bytes)
+const entry = Buffer.alloc(16);
+entry[0] = 0; // width (0 = 256)
+entry[1] = 0; // height (0 = 256)
+entry[2] = 0;
+entry[3] = 0;
+entry.writeUInt16LE(1, 4);  // color planes
+entry.writeUInt16LE(32, 6); // bits per pixel
+entry.writeUInt32LE(40 + maskData.length + xorData.length, 8); // size
+entry.writeUInt32LE(22, 12); // offset (6 + 16)
+
+const imageData = Buffer.concat([bmih, maskData, xorData]);
+fs.writeFileSync("build/farol.ico", Buffer.concat([header, entry, imageData]));
+console.log("build/farol.ico created");
