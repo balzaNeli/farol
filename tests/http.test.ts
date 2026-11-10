@@ -118,7 +118,7 @@ test("/api/info reports status and never a secret", async (t) => {
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     const body = (await res.json()) as Record<string, unknown>;
-    assert.equal(body.name, "screenmirror");
+    assert.equal(body.name, "farol");
     assert.equal(typeof body.version, "string");
     assert.equal(body.pairingOpen, true);
     assert.equal(body.lockedUntilMs, 0);

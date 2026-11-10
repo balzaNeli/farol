@@ -3,6 +3,8 @@
 Espelhe a tela do PC **e o áudio do sistema** para um dispositivo na mesma rede Wi-Fi, direto no navegador.
 Sem conta, sem nuvem, nada para instalar no visualizador, e nenhum tráfego que saia da rede local.
 
+🇬🇷 **English version:** [README-EN.md](README-EN.md)
+
 Foi feito para o caso em que o Deskreen fica enrolado: uma **Amazon Fire TV rodando Silk com controle
 remoto (D-pad)** como tela. Celulares e tablets funcionam, mas toda decisão é tomada para a Fire TV
 primeiro — sem teclado, sem touch, sem câmera, SoC fraco — e não pode quebrar os outros.
