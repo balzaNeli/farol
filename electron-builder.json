@@ -1,6 +1,6 @@
 {
-  "appId": "com.screenmirror.app",
-  "productName": "screenmirror",
+  "appId": "com.farol.app",
+  "productName": "Farol",
   "directories": {
     "output": "release"
   },
@@ -9,7 +9,7 @@
     "package.json"
   ],
   "win": {
-    "icon": "build/icon.ico",
+    "icon": "build/farol-256.png",
     "target": [
       {
         "target": "nsis",

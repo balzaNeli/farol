@@ -1,254 +1,260 @@
-# screenmirror
+# Farol
 
-Mirror your PC's screen **and its system audio** to a device on the same Wi-Fi, in a browser.
-No account, no cloud, nothing to install on the viewer, and no traffic that leaves the LAN.
+Espelhe a tela do PC **e o áudio do sistema** para um dispositivo na mesma rede Wi-Fi, direto no navegador.
+Sem conta, sem nuvem, nada para instalar no visualizador, e nenhum tráfego que saia da rede local.
 
-It exists for the case Deskreen makes awkward: an **Amazon Fire TV running Silk with a D-pad
-remote** as the screen. Phones and tablets are supported, but every decision is made for the Fire
-TV first — keyboard-less, touch-less, camera-less, weak SoC — and must not break the others.
+Foi feito para o caso em que o Deskreen fica enrolado: uma **Amazon Fire TV rodando Silk com controle
+remoto (D-pad)** como tela. Celulares e tablets funcionam, mas toda decisão é tomada para a Fire TV
+primeiro — sem teclado, sem touch, sem câmera, SoC fraco — e não pode quebrar os outros.
 
-> **Status: working, pre-release.** The LAN server, pairing, signalling, the Electron host UI
-> (URL/PIN/QR panel), the capture engine and the viewer are written and tested. There is no
-> installer or release; the final acceptance run remains. See [Status](#status).
+> **Status: funcional, pré-lançamento.** O servidor LAN, emparelhamento, sinalização, a IU do host
+> Electron (URL/PIN/QR), o motor de captura e o visualizador estão escritos e testados. Não há
+> instalador nem release oficial ainda. Veja [Status](#status).
 
-## How it works
+## Como funciona
 
 ```
-  host PC                                          viewer (Fire TV · phone · tablet)
-  ┌────────────────────────────────┐               ┌──────────────────────────────┐
-  │ Electron host window (file://) │               │ browser, no install, no app  │
-  │  · screen + system audio       │               │  · receive-only WebRTC       │
-  │  · screen capture, H.264 first │               │  · one <video>, D-pad or tap │
-  └───────────────┬────────────────┘               └───────────────┬──────────────┘
-                  │ IPC                                            │ HTTP + WebSocket
-  ┌───────────────▼────────────────────────────────────────────────▼──────────────┐
-  │ embedded Node server — 0.0.0.0:<port>                                          │
-  │   GET  /            viewer page            POST /api/pair   PIN → token        │
-  │   WS   /ws          signalling relay (offer / answer / ICE; never parses SDP)   │
-  │   GET  /probe       hardware probe, for when a TV misbehaves                    │
-  └────────────────────────────────────────────────────────────────────────────────┘
-        the media never touches the server: WebRTC flows host ⇄ viewer, peer to peer
+   host PC                                          visualizador (Fire TV · celular · tablet)
+ ┌────────────────────────────────┐                ┌──────────────────────────────────┐
+ │ Janela host Electron (file://) │                │ navegador, sem instalação, sem app │
+ │  · tela + áudio do sistema     │                │  · WebRTC somente-recebimento    │
+ │  · captura de tela, H.264      │                │  · um <video>, D-pad ou toque    │
+ └───────────────┬────────────────┘                └───────────────┬───────────────────┘
+                 │ IPC                                             │ HTTP + WebSocket
+ ┌───────────────▼─────────────────────────────────────────────────▼──────────────────┐
+ │ servidor Node embarcado — 0.0.0.0:<porta>                                          │
+ │   GET  /            página do visualizador   POST /api/pair   PIN → token          │
+ │   WS   /ws          retransmissor de sinalização (offer/answer/ICE; nunca faz     │
+ │                     parse de SDP)                                                 │
+ │   GET  /probe       sonda de hardware, para quando a TV se comporta mal          │
+ └────────────────────────────────────────────────────────────────────────────────────┘
+        a mídia nunca toca no servidor: WebRTC flui host ⇄ visualizador, ponto a ponto
 ```
 
-Pairing: the host window shows a URL, a QR code and a 6-digit PIN. The viewer submits the PIN
-over plain HTTP on the LAN, gets a **single-use token**, and opens one WebSocket with it. The
-server relays the SDP/ICE handshake between host and viewer and then gets out of the way — the
-video and audio travel directly between the two devices.
+O emparelhamento funciona assim: a janela host mostra uma URL, um QR code e um PIN de 6 dígitos.
+O visualizador envia o PIN por HTTP na LAN, recebe um **token de uso único** e abre um WebSocket com
+ele. O servidor retransmite o aperto de mãos SDP/ICE entre host e visualizador e sai de cena — o
+vídeo e o áudio viajam diretamente entre os dois dispositivos.
 
 ## Status
 
-| Piece | State |
+| Peça | Estado |
 |---|---|
-| LAN server: static serving, `/api/info`, `POST /api/pair`, `/ws` relay | **done**, suite green |
-| Pairing store: PIN TTL, rotation, 3-strike lockout, single-use tokens | **done** |
-| Probe page at `/probe` for real-hardware questions | **done**, and it decided the transport |
-| Electron host shell: window, permissions, IPC, host socket | **done**, verified against the real window (Task 8) |
-| Host capture engine: `getDisplayMedia`, H.264, peer wiring | **done**, verified with a fake peer (Task 9) |
-| Viewer UI: PIN pad, `<video>`, remote controls, `?debug=1` | **done**, verified in Edge and on the Fire TV (Task 10 / Checkpoint 3) |
-| Host UI: LAN URLs, PIN countdown, QR, viewer status, source/quality/audio controls, failure text | **done**, verified over CDP and with a phone scan (Task 11) |
-| Viewer polish: autoplay fallback, hotkeys, controls, overscan, ICE-restart reconnect | **done**, verified over CDP (Task 12) |
-| Security/README pass: headers/CSP on every route, no PIN/token leaks, troubleshooting | **done**, `tests/security.test.ts` (Task 13) |
+| Servidor LAN: servir arquivos estáticos, `/api/info`, `POST /api/pair`, retransmissor `/ws` | **feito**, suíte verde |
+| Loja de emparelhamento: TTL do PIN, rotação, lockout de 3 tentativas, tokens de uso único | **feito** |
+| Página de sonda em `/probe` para perguntas sobre hardware real | **feito**, e decidiu o transporte |
+| Casca do host Electron: janela, permissões, IPC, socket do host | **feito**, verificado na janela real (Tarefa 8) |
+| Motor de captura do host: `getDisplayMedia`, H.264 primeiro, fiação do peer | **feito**, verificado com peer falso (Tarefa 9) |
+| IU do visualizador: PIN pad, `<video>`, controles remotos, `?debug=1` | **feito**, verificado no Edge e na Fire TV (Tarefa 10 / Checkpoint 3) |
+| IU do host: URLs de LAN, contagem regressiva do PIN, QR, status do visualizador, controles de fonte/qualidade/áudio, texto de falha | **feito**, verificado sobre CDP e com scan de celular (Tarefa 11) |
+| Refinamento do visualizador: fallback de autoplay, teclas de atalho, controles, overscan, reconnect com reinício de ICE | **feito**, verificado sobre CDP (Tarefa 12) |
+| Passe de segurança/README: cabeçalhos/CSP em toda rota, nenhum vazamento de PIN/token, solução de problemas | **feito**, `tests/security.test.ts` (Tarefa 13) |
 
-What you can run today: the full host and viewer. The host window shows every LAN URL, the rotating
-PIN and the QR code, and starts the capture; scan the QR on a phone or type the PIN on the Fire TV.
-The viewer walks the full pair → stream → mute/fullscreen/stop cycle, including the muted autoplay
-fallback and the reconnect screen; the pairing endpoint can still be exercised with `curl`.
-`npm run serve` runs the LAN server and viewer without the Electron host (the PIN is printed in the
-terminal), so it is a protocol/dev tool, not the mirroring product.
+O que você pode rodar hoje: o host e o visualizador completos. A janela host mostra todas as URLs de
+LAN, o PIN rotativo e o QR code; escaneie o QR com um celular ou digite o PIN na Fire TV. O
+visualizador percorre todo o ciclo parear → stream → silenciar/tela cheia/parar, incluindo o fallback
+de autoplay silenciado e a tela de reconectar; o endpoint de emparelhamento ainda pode ser exercitado
+com `curl`. `npm run serve` roda o servidor LAN e o visualizador sem o host Electron (o PIN é
+impresso no terminal), então é uma ferramenta de protocolo/dev, não o produto de espelhamento.
 
-## Requirements
+## Requisitos
 
-- **Node.js 24+** — the source and the tests run as TypeScript with no compile step.
-- **Windows** for system audio (Electron only exposes `audio: 'loopback'` there today). On macOS
-  and Linux the app runs **video only** and says so.
-- A **LAN** where devices can reach each other: no guest network, no AP/client isolation.
-- For the primary target: a Fire TV with Silk. The measured reference is an `AFTCA002`.
+- **Node.js 24+** — o código-fonte e os testes rodam TypeScript sem etapa de compilação.
+- **Windows** para áudio do sistema (o Electron só expõe `audio: 'loopback'` lá hoje). No macOS e
+  Linux o app roda **apenas vídeo** e avisa isso.
+- Uma **LAN** onde os dispositivos consigam se alcançar: nada de rede de convidados, nada de
+  isolamento AP/cliente.
+- Para o alvo primário: uma Fire TV com Silk. A referência medida é uma `AFTCA002`.
 
-## Quick start
+## Início rápido
 
 ```bash
 npm install
-npm run build        # compiles src/ to dist/ and bundles the two SPAs
-npm start            # Electron host: capture, LAN URLs, PIN and QR
-# or, without Electron:
-npm run serve        # LAN server on :4680 (PORT=4681 to change), prints the PIN
+npm run build        # compila src/ para dist/ e empacota as duas SPAs
+npm start            # host Electron: captura, URLs de LAN, PIN e QR
+# ou, sem Electron:
+npm run serve        # servidor LAN na porta 4680 (PORT=4681 para mudar), imprime o PIN
 ```
 
-The host window shows the QR, the LAN URLs and the PIN. Scan the QR with a phone, or open the URL
-on the Fire TV and enter the PIN. `http://<lan-ip>:4680/probe` is the hardware probe; it runs its
-safe checks (1–4) from a single button. `npm run serve` runs the viewer and API without capture
-(the PIN is printed in the terminal), for protocol checks.
+A janela host mostra o QR, as URLs de LAN e o PIN. Escaneie o QR com um celular, ou abra a URL na
+Fire TV e digite o PIN. `http://<lan-ip>:4680/probe` é a sonda de hardware; ela roda as verificações
+seguras (1–4) a partir de um único botão. `npm run serve` roda o visualizador e a API sem captura
+(o PIN é impresso no terminal), para verificações de protocolo.
 
-### Fire TV (first time)
+### Fire TV (primeira vez)
 
-1. On the Fire TV, open Silk and type the LAN URL the host shows (`http://<lan-ip>:4680/`).
-2. Bookmark that page in Silk. The exact menu label varies by Fire OS and Silk version.
-3. After that, open the bookmark and enter the six-digit PIN; the sixth digit submits. The QR code
-   is for phones/tablets, not the TV remote.
+1. Na Fire TV, abra o Silk e digite a URL de LAN que o host mostra (`http://<lan-ip>:4680/`).
+2. Marque essa página como favorita no Silk. O rótulo exato do menu varia conforme a versão do Fire OS e do Silk.
+3. Depois, abra o favorito e digite o PIN de seis dígitos; o sexto dígito envia. O QR code é para celulares/tablets, não para o controle remoto da TV.
 
-The pairing endpoint, by hand:
+O endpoint de emparelhamento, à mão:
 
 ```bash
-# POSIX shell, Git Bash, WSL
+# Shell POSIX, Git Bash, WSL
 curl -X POST http://127.0.0.1:4680/api/pair \
   -H "content-type: application/json" -d '{"pin":"482720"}'
 ```
 
 ```powershell
-# Windows PowerShell — verified on PS 5.1, which mangles inner quotes on the way to a native
-# curl.exe (the JSON arrives as {pin:482720} and the server rightly calls it bad_request).
-# Invoke-WebRequest has no such problem, and the catch prints the error body:
+# Windows PowerShell — verificado no PS 5.1, que mele aspas internas ao passar para o
+# curl.exe nativo (o JSON chega como {pin:482720} e o servidor, com razão, chama de bad_request).
+# O Invoke-WebRequest não tem esse problema, e o catch imprime o corpo do erro:
 $body = '{"pin":"482720"}'
 try   { (Invoke-WebRequest -Method Post -Uri http://127.0.0.1:4680/api/pair -ContentType application/json -Body $body -UseBasicParsing).Content }
 catch { (New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd() }
 ```
 
-Either way: `200 {"token":"…"}` · `401 {"error":"invalid_pin","attemptsLeft":2}` ·
+De qualquer forma: `200 {"token":"…"}` · `401 {"error":"invalid_pin","attemptsLeft":2}` ·
 `429 {"error":"locked","retryAfterMs":…}` · `409 {"error":"busy"}` ·
-`400 {"error":"bad_request"}` for a malformed body. Substitute the PIN the server printed.
+`400 {"error":"bad_request"}` para corpo malformado. Substitua pelo PIN que o servidor imprimiu.
 
-`npm start` launches the Electron shell against the existing `dist/`; run `npm run build` first.
-`npm run dev` builds once, then rebuilds the web bundles on change and launches Electron
-(main/preload are not watched, so restart it after main-process edits). `npm run serve` keeps the
-server available without Electron, for probe and pairing checks.
+`npm start` lança o casulo Electron contra o `dist/` existente; rode `npm run build` primeiro.
+`npm run dev` constrói uma vez, então reconstrói os pacotes web à medida que mudam e lança o Electron
+(main/preload não são vigiados, então reinicie-o depois de editar o processo principal).
+`npm run serve` mantém o servidor disponível sem Electron, para sondas e verificações de emparelhamento.
 
-## Commands
+## Comandos
 
-| Command | What it does |
+| Comando | O que faz |
 |---|---|
-| `npm run verify` | lint + test + build. **This is the gate** — there is no CI, run it before every commit |
-| `npm test` | whole suite (`node --test`). The glob form is required |
-| `npm run coverage` | the same, with line/branch numbers |
-| `npm run lint` | `eslint . --max-warnings 0` — zero warnings allowed |
-| `npm run build` | `tsc` for main/preload/server → `dist/`, then Vite for the renderer and viewer |
-| `npm start` | the Electron host shell against the existing `dist/` (build first) |
-| `npm run dev` | build once, then rebuild the web bundles on change and launch Electron |
-| `npm run serve` | the LAN server alone, no Electron (`PORT=` overrides) |
+| `npm run verify` | lint + teste + build. **Este é o gate** — não há CI, rode antes de cada commit |
+| `npm test` | suíte inteira (`node --test`). A forma com glob é obrigatória |
+| `npm run coverage` | o mesmo, com números de linha/ramo |
+| `npm run lint` | `eslint . --max-warnings 0` — zero avisos permitidos |
+| `npm run build` | `tsc` para main/preload/server → `dist/`, então Vite para renderer e visualizador |
+| `npm start` | casulo host Electron contra o `dist/` existente (construa primeiro) |
+| `npm run dev` | constrói uma vez, então reconstrói os pacotes web à mudança e lança o Electron |
+| `npm run serve` | servidor LAN sozinho, sem Electron (`PORT=` sobrescreve) |
+| `npm run dist` | empacota o instalador Windows (NSIS) em `release/` |
 
-## Privacy and security model
+## Modelo de privacidade e segurança
 
-The whole point is that nothing leaves the house, so the rules are strict and written down:
+O ponto inteiro é que nada sai de casa, então as regras são rígidas e escritas:
 
-- **No STUN, no TURN, no cloud.** `RTC_CONFIG.iceServers` is empty and frozen, asserted by unit
-  test (and, from Task 14, by a `grep` gate in `verify`). Peer-to-peer is only ever attempted
-  across the LAN, which is why the app is useless outside it — by design.
-- **The host window is `file://`, never served over the LAN.** It shows the PIN; if it were on
-  `0.0.0.0`, any device on the network could read the PIN by loading a URL.
-- **The viewer is receive-only.** It never calls `getUserMedia`/`getDisplayMedia`, never asks for a
-  permission, and never feature-detects `navigator.mediaDevices` — Silk hides that object on a TV
-  with no camera, which is the origin of the "Silk has no WebRTC" myth. The peer connection is
-  there. This rule is a `grep` gate as well.
-- **One viewer at a time.** A second pairing is refused (`409`) while a session is live.
-- PIN: 6 digits, 60 s TTL, rotates on expiry, on success and on the third failure, then a 60 s
-  lockout. Tokens: 32 random bytes, single-use at WebSocket connect, dropped with the connection.
-  The PIN never appears in a response body, in a log line, or on disk.
-- The **host socket** additionally needs a per-boot secret token *and* must come from loopback, so
-  a viewer can never claim the host role.
-- **Accepted limit: HTTP is plain.** Anyone who can sniff the Wi-Fi can read the PIN and the
-  token during the 60 s window. That is the home-LAN threat model; TLS with self-signed certs on a
-  TV browser was judged not worth the friction.
-- **Accepted: the QR is a photographable secret.** Anyone who can see the host screen can read the
-  same PIN off it, so the QR is no weaker than the digits; the 60 s TTL and single-use token bound
-  the damage.
-- **Accepted: system audio is the whole-system mix.** Sharing one window still sends every
-  notification sound. Per-app capture is out of scope for v1.
+- **Sem STUN, sem TURN, sem nuvem.** `RTC_CONFIG.iceServers` está vazio e congelado, afirmado por
+  teste de unidade (e, a partir da Tarefa 14, por um gate `grep` no `verify`). Peer-to-peer é apenas
+  tentado na LAN, o que é por que o app é inútil fora dela — por projeto.
+- **A janela host é `file://`, nunca servida na LAN.** Ela mostra o PIN; se estivesse em `0.0.0.0`,
+  qualquer dispositivo na rede poderia ler o PIN carregando uma URL.
+- **O visualizador é somente-recebimento.** Ele nunca chama `getUserMedia`/`getDisplayMedia`, nunca
+  pede uma permissão, e nunca faz feature-detect de `navigator.mediaDevices` — o Silk esconde esse
+  objeto em uma TV sem câmera, que é a origem do mito "Silk não tem WebRTC". O peer connection está
+  lá. Esta regra é um `grep` gate também.
+- **Um visualizador por vez.** Um segundo emparelhamento é recusado (`409`) enquanto uma sessão está
+  ao vivo.
+- PIN: 6 dígitos, TTL de 60 s, expira, rotaciona no sucesso e na terceira falha, então um lockout de
+  60 s. Tokens: 32 bytes aleatórios, de uso único na conexão WebSocket, descartados com a conexão.
+  O PIN nunca aparece em um corpo de resposta, em uma linha de log, ou no disco.
+- O **socket do host** adicionalmente precisa de um token secreto por boot *e* deve vir do loopback,
+  então um visualizador nunca pode reivindicar o papel de host.
+- **Limite aceito: HTTP é simples.** Qualquer um que possa farejar o Wi-Fi pode ler o PIN e o token
+  durante a janela de 60 s. Este é o modelo de ameaça da LAN doméstica; TLS com certificado
+  auto-assinado em um navegador de TV foi julgado não valer o atrito.
+- **Aceito: o QR é um segredo fotografável.** Qualquer um que possa ver a tela do host pode ler o
+  mesmo PIN nele, então o QR não é mais fraco que os dígitos; o TTL de 60 s e o token de uso único
+  limitam o dano.
+- **Aceito: o áudio do sistema é a mixagem de todo o sistema.** Compartilhar uma janela ainda envia
+  cada som de notificação. Captura por aplicativo está fora do escopo do v1.
 
-## Known limits
+## Limites conhecidos
 
-These are real, measured, and documented on purpose — the interesting part of a mirroring tool is
-where it breaks:
+Estes são reais, medidos e documentados de propósito — a parte interessante de uma ferramenta de
+espelhamento é onde ela quebra:
 
-- **The Fire TV must never encode.** Two loopback probes at 720p30 froze an `AFTCA002` hard enough
-  to need a power cycle (an MSE chunk-streaming test and a WebRTC one). The device has no headroom
-  for anything beyond decode-and-display, which is exactly what it does here. See
-  `docs/manual-tests.md`.
-- **The receive ceiling is not locked yet**: Checkpoint 3 streamed 1080p30, but it does not hold a
-  steady 30 fps; 720p30 is the fallback. Tuning is a Task 14 follow-up.
-- **System audio is Windows-only** and it is the **whole system mix**, not per application:
-  sharing one window still sends every notification sound. The UI does not pretend otherwise.
-- **`navigator.mediaDevices` is hidden** in Silk, so any future viewer-side capture (voice,
-  screenshots) is off the table on this device.
-- **Silk's accelerated rendering** may break other web-platform features on some Fire TV models;
-  turning that setting off is the documented workaround.
-- The Fire TV URL must be typed once with the remote — bookmark it.
-- Browser autoplay policies may need one button press on the viewer before sound is audible
-  (iOS Safari in particular). The video keeps playing muted; focus "Press OK for sound" and press
-  OK/Enter, or tap it on a phone, to unmute.
-- **AP/client isolation or a guest network kills it** — no route, no stream. Symptom and diagnosis
-  live in the troubleshooting notes.
-- Windows Firewall asks for permission on first run.
-- A failed ICE restart shows a reconnect screen and returns to the PIN pad; re-pairing does not
-  reload the page. A physical Wi-Fi-drop test is still pending.
-- Maximum one viewer, one screen at a time. Microphone capture, file transfer, whiteboard,
-  multi-viewer and internet traversal are explicit non-goals for v1.
+- **A Fire TV nunca deve codificar.** Duas sondas de loopback a 720p30 congelaram uma `AFTCA002`
+  o suficiente para precisar de um ciclo de energia (um teste de streaming por chunk MSE e um WebRTC).
+  O dispositivo não tem folga para nada além de decodificar-e-exibir, que é exatamente o que ele faz
+  aqui. Veja `docs/manual-tests.md`.
+- **O teto de recebimento ainda não está travado:** o Checkpoint 3 transmitiu 1080p30, mas não segura
+  30 fps estável; 720p30 é o fallback. Ajuste é um acompanhamento da Tarefa 14.
+- **Áudio do sistema é apenas no Windows** e é a **mixagem de todo o sistema**, não por aplicativo:
+  compartilhar uma janela ainda envia cada som de notificação. A IU não finge o contrário.
+- **`navigator.mediaDevices` está escondido** no Silk, então qualquer captura futura do lado do
+  visualizador (voz, capturas de tela) está fora de questão neste dispositivo.
+- **A renderização acelerada do Silk** pode quebrar outros recursos da plataforma web em alguns
+  modelos de Fire TV; desligar essa configuração é o workaround documentado.
+- A URL da Fire TV deve ser digitada uma vez com o controle remoto — marque-a como favorita.
+- Políticas de autoplay do navegador podem precisar de um toque no visualizador antes do som ser
+  audível (Safari no iOS, em particular). O vídeo continua tocando mudo; foque "Press OK for sound"
+  e aperte OK/Enter, ou toque nele em um celular, para ativar o som.
+- **Isolamento AP/cliente ou uma rede de convidados mata isso** — sem rota, sem stream. Sintoma e
+  diagnóstico ficam nas notas de solução de problemas.
+- O Windows Firewall pede permissão na primeira execução.
+- Um reinício de ICE falhado mostra uma tela de reconectar e retorna ao PIN pad; reemparelhar não
+  recarrega a página. Um teste físico de queda de Wi-Fi ainda está pendente.
+- No máximo um visualizador, uma tela por vez. Captura de microfone, transferência de arquivos,
+  quadro branco, múltiplos visualizadores e travessia de internet são não-goals explícitos do v1.
 
-## Troubleshooting
+## Solução de problemas
 
-| Symptom | Likely cause | What to do |
+| Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| Nothing loads on the TV | Windows Firewall blocked the app, or the devices are on different networks | Allow the app (Electron, or Node for `npm run serve`) on **Private** networks when Windows asks; if the prompt was dismissed, add an inbound rule for the app and the printed port (4680 by default). Use the exact LAN URL the host prints; a Public network profile blocks it |
-| The page loads but the stream never starts, or it freezes after a few seconds | AP/client isolation, a guest network, a VPN on the host, or a router that blocks peer-to-peer | Put both devices on the same non-guest SSID, disable the host VPN, and check the router's client-isolation setting. The host disables Chromium's mDNS candidate hiding so its candidates are real LAN IPs, but a router that blocks multicast or a viewer that only offers `.local` can still fail; there is no TURN fallback by design |
-| Silk shows a blank page, black video or misplaced controls | Silk's accelerated rendering on some Fire TV models | Turn off accelerated rendering in Silk's settings (the menu label varies by Fire OS version), reload the viewer, and try `/probe` to confirm WebRTC |
-| Video plays but there is no sound | The browser/TV blocked unmuted autoplay | The video stays playing muted. Focus **Press OK for sound** and press OK/Enter, or tap it on a phone. On iOS, one tap |
-| Host says "System audio is unavailable on this OS. Video only." | Electron loopback capture is Windows-only | Expected on macOS/Linux; this is the video-only path. On Windows this message should not appear. For silent audio on Windows, check the output device and the app's volume in the mixer, then restart capture with audio enabled |
-| Stutter or a slideshow instead of video | The link is saturated, or the codec is not H.264 | Check `?debug=1` for H.264 and 720p/1080p; close other traffic or lower the quality. The Fire TV decodes; it must never encode |
-| The TV became unresponsive during testing | It was asked to encode by a probe | Power-cycle it and do not re-run probe checks 4b or 6 on that device |
+| Nada carrega na TV | O Firewall do Windows bloqueou o app, ou os dispositivos estão em redes diferentes | Permita o app (Electron, ou Node para `npm run serve`) em redes **Privadas** quando o Windows pedir; se o prompt foi dispensado, adicione uma regra de entrada para o app e a porta impressa (4680 por padrão). Use a URL de LAN exata que o host imprime; um perfil de rede Pública bloqueia |
+| A página carrega mas o stream nunca inicia, ou congela após alguns segundos | Isolamento AP/cliente, rede de convidados, VPN no host, ou um roteador que bloqueia ponto a ponto | Coloque ambos os dispositivos na mesma SSID não-convidada, desligue a VPN do host, e cheque a configuração de isolamento de clientes do roteador. O host desativa o esconderijo de candidatos mDNS do Chromium para que seus candidatos sejam IPs de LAN reais, mas um roteador que bloqueia multicast ou um visualizador que só oferece `.local` ainda pode falhar; não há fallback TURN por projeto |
+| O Silk mostra página em branco, vídeo preto ou controles deslocados | Renderização acelerada do Silk em alguns modelos de Fire TV | Desligue a renderização acelerada nas configurações do Silk (o rótulo do menu varia pela versão do Fire OS), recarregue o visualizador, e tente `/probe` para confirmar WebRTC |
+| O vídeo toca mas não há som | O navegador/TV bloqueou autoplay sem som | O vídeo continua tocando mudo. Foque **Press OK for sound** e aperte OK/Enter, ou toque em um celular. No iOS, um toque |
+| O host diz "Áudio do sistema indisponível neste sistema. Apenas vídeo." | Captura de loopback do Electron é apenas no Windows | Esperado no macOS/Linux; este é o caminho apenas vídeo. No Windows esta mensagem não deve aparecer. Para áudio mudo no Windows, cheque o dispositivo de saída e o volume do app no misturador, então reinicie a captura com áudio habilitado |
+| Travamento ou apresentação de slides em vez de vídeo | O link está saturado, ou o codec não é H.264 | Cheque `?debug=1` para H.264 e 720p/1080p; feche outro tráfego ou baixe a qualidade. A Fire TV decodifica; ela nunca deve codificar |
+| A TV ficou sem resposta durante testes | Ela foi solicitada a codificar por uma sonda | Faça ciclo de energia e não reexecute as sondas 4b ou 6 naquele dispositivo |
 
-## Testing
+## Testes
 
 ```bash
-npm run verify     # lint + tests + coverage gate + build + no-STUN/receive-only gates
-npm run coverage   # >=90% lines on the four pure modules
+npm run verify     # lint + testes + gate de cobertura + build + gates sem-STUN/somente-recebimento
+npm run coverage   # >=90% de linhas nos quatro módulos puros
 ```
 
-The suite runs TypeScript directly on Node 24 (`node --test`), starts **real servers on port 0**
-and talks to them over real HTTP and WebSocket connections — nothing of ours is mocked, because
-the mocks are what would be wrong. `npm run coverage` reports the four pure modules and fails below
-90% lines; `npm run verify` also scans `src/` and `dist/` for a non-empty `iceServers:` and for
-viewer capture APIs.
+A suíte roda TypeScript diretamente no Node 24 (`node --test`), inicia **servidores reais na porta 0**
+e conversa com eles por conexões HTTP e WebSocket reais — nada do nosso é mockado, porque os mocks
+são o que estaria errado. `npm run coverage` reporta os quatro módulos puros e falha abaixo de 90%
+de linhas; `npm run verify` também escaneia `src/` e `dist/` em busca de um `iceServers:` não vazio
+e de APIs de captura no visualizador.
 
-Everything that depends on a real screen, a real Wi-Fi link and a real TV is logged in
-`docs/manual-tests.md`, including the runs that froze the hardware. That file is the project's
-memory: it is where "it should work" gets replaced by a number.
+Tudo que depende de uma tela real, um link Wi-Fi real e uma TV real é logado em
+`docs/manual-tests.md`, incluindo as execuções que congelaram o hardware. Este arquivo é a memória
+do projeto: é onde "deveria funcionar" é substituído por um número.
 
 ## Roadmap
 
-1. **Checkpoint 2** — protocol proven headlessly (done: two peers relay offer/answer/ICE through
-   the real server; replayed token, foreign origin and three failed PINs (lockout) all rejected).
-2. **Tasks 8–10** — Electron shell, capture engine and viewer app **done** (window, permissions,
-   IPC, host socket, H.264 preference, live quality/audio; D-pad PIN pad, stream, controls and
-   `?debug=1`).
-3. **Checkpoint 3** — end-to-end on the Fire TV: **functionally passed 2026-10-19** (remote-only
-   pairing, 1080p stream, audio and overlay controls); first-frame timing and a locked 1080p30
-   remain measurement/tuning follow-ups.
-4. **Tasks 11–13 — done 2026-10-22**: host UI (LAN URLs, rotating PIN, QR, viewer status,
-   controls); viewer polish (autoplay fallback, hotkeys, overscan, ICE-restart reconnect);
-   security/README pass (headers/CSP on every route, no PIN/token leaks, troubleshooting).
-   **Task 14** — coverage + constraint gates and the full acceptance run remain.
+1. **Checkpoint 2** — protocolo provado sem cabeça (feito: dois peers retransmitem offer/answer/ICE
+   através do servidor real; token replayado, origem estrangeira e três PINs falhados (lockout)
+   todos rejeitados).
+2. **Tarefas 8–10** — casulo Electron, motor de captura e app do visualizador **feito** (janela,
+   permissões, IPC, socket do host, preferência H.264, qualidade/áudio ao vivo; PIN pad de D-pad,
+   stream, controles e `?debug=1`).
+3. **Checkpoint 3** — ponta a ponta na Fire TV: **passou funcionalmente em 2026-10-19** (emparelhamento
+   só com controle remoto, stream 1080p, áudio e controles de sobreposição); tempo do primeiro frame
+   e um 1080p30 travado permanecem como acompanhamento/metri­cagem.
+4. **Tarefas 11–13 — feito em 2026-10-22**: IU do host (URLs de LAN, PIN rotativo, QR, status do
+   visualizador, controles); refinamento do visualizador (fallback de autoplay, teclas de atalho,
+   overscan, reconnect com reinício de ICE); passe de segurança/README (cabeçalhos/CSP em toda rota,
+   nenhum vazamento de PIN/token, solução de problemas). **Tarefa 14** — gates de cobertura +
+   restrição e a execução completa de aceitação permanecem.
 
-## Repository map
+## Mapa do repositório
 
-| Path | What is in it |
+| Caminho | O que está nele |
 |---|---|
-| `SPEC.md` | the source of truth for behaviour (rev 5, approved) |
-| `tasks/plan.md` | phases, checkpoints, risks |
-| `tasks/todo.md` | every task with its acceptance criteria |
-| `docs/manual-tests.md` | hardware results, probe safety rules, acceptance runs |
-| `src/shared/` | pure, runtime-free logic: protocol guard, codec and audio choice, `RTC_CONFIG` |
-| `src/server/` | the entire LAN surface: static serving, pairing store, signalling relay |
-| `src/renderer/`, `src/viewer/` | the two React SPAs: host window (`file://`) and viewer |
-| `AGENTS.md` | notes for contributors working with an AI agent: commands, quirks, non-negotiables |
+| `SPEC.md` | a fonte da verdade para comportamento (rev 5, aprovado) |
+| `tasks/plan.md` | fases, checkpoints, riscos |
+| `tasks/todo.md` | cada tarefa com seus critérios de aceitação |
+| `docs/manual-tests.md` | resultados de hardware, regras de segurança da sonda, execuções de aceitação |
+| `src/shared/` | lógica pura, livre de runtime: guarda de protocolo, escolha de codec e áudio, `RTC_CONFIG` |
+| `src/server/` | toda a superfície LAN: servir estático, loja de emparelhamento, retransmissor de sinalização |
+| `src/renderer/`, `src/viewer/` | as duas SPAs React: janela host (`file://`) e visualizador |
+| `AGENTS.md` | notas para colaboradores que trabalham com um agente de IA: comandos, peculiaridades, não-negociáveis |
 
-## Contributing
+## Contribuindo
 
-- Read `SPEC.md` first, then `tasks/todo.md`. Behaviour is specified before it is built, and the
-  three files (spec, tasks, code) are kept in step — a commit names the task it implements.
-- `npm run verify` must be green before a commit, with **zero** lint warnings and no skipped or
-  deleted tests to get there.
-- New runtime dependencies need a very good reason: `ws` and `qrcode` are the entire budget.
-- Non-negotiables, in one line each: the viewer never captures, `iceServers` stays empty, the host
-  UI stays off the LAN, and the signalling relay never parses SDP.
+- Leia `SPEC.md` primeiro, depois `tasks/todo.md`. O comportamento é especificado antes de ser
+  construído, e os três arquivos (especificação, tarefas, código) são mantidos em sintonia — um
+  commit nomeia a tarefa que implementa.
+- `npm run verify` deve estar verde antes de um commit, com **zero** avisos de lint e nenhum teste
+  pulado ou deletado para chegar lá.
+- Novas dependências de runtime precisam de uma razão muito boa: `ws` e `qrcode` são todo o orçamento.
+- Não-negociáveis, em uma linha cada: o visualizador nunca captura, `iceServers` permanece vazio, a
+  IU do host permanece fora da LAN, e o retransmissor de sinalização nunca faz parse de SDP.
 
-## License
+## Licença
 
-MIT — see [LICENSE](LICENSE).
+MIT — veja [LICENSE](LICENSE).

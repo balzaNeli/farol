@@ -1,10 +1,10 @@
 {
-  "name": "screenmirror",
+  "name": "farol",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Local Wi-Fi screen + system audio mirroring for Fire TV and phones (Deskreen alternative)",
+  "description": "Espelhamento de tela e áudio do sistema via Wi-Fi local, sem nuvem — Fire TV com Silk e navegador",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "npm run build && node scripts/dev.mjs",
