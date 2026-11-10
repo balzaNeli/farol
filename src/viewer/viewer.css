@@ -143,12 +143,16 @@ button:focus {
   padding: 5vmin;
   background: #000;
 }
+.watch[data-fullscreen="true"] {
+  padding: 0;
+}
 
 .watch-video {
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #000;
+  display: block;
 }
 
 .watch-message {
