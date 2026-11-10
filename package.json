@@ -17,6 +17,7 @@
     "coverage": "node --test --experimental-test-coverage --test-coverage-include=src/shared/protocol.ts --test-coverage-include=src/shared/audio.ts --test-coverage-include=src/shared/codecs.ts --test-coverage-include=src/server/pairing.ts --test-coverage-lines=90 \"tests/**/*.test.ts\"",
     "lint": "eslint . --max-warnings 0",
     "check:gates": "node scripts/check-gates.mjs",
+    "dist": "electron-builder",
     "verify": "npm run lint && npm test && npm run coverage && npm run build && npm run check:gates"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "@types/react-dom": "^19.2.0",
     "@types/ws": "^8.18.2",
     "electron": "^44.9.0",
+    "electron-builder": "^26.18.0",
     "eslint": "^10.13.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.0",
