@@ -1,5 +1,5 @@
 import { preferH264 } from "../shared/codecs.ts";
-import { videoConstraints } from "../shared/capture.ts";
+import { TARGET_BITRATE_BPS, videoConstraints, videoEncodingParams } from "../shared/capture.ts";
 import type { Quality, StartRequest } from "../shared/ipc.ts";
 import type { Signal } from "../shared/protocol.ts";
 import { RTC_CONFIG } from "../shared/rtc.ts";
@@ -148,7 +148,9 @@ export function createMirror(): Mirror {
 
       const video = capture.getVideoTracks()[0];
       if (video === undefined) throw new Error("display capture returned no video track");
-      video.contentHint = "detail";
+      // "motion" instrui o Chromium a derrubar qualidade visual, não quadros, quando o encoder
+      // estiver pressionado. Complementa o teto de bitrate fixo (5 Mbps) sem reduzir a resolução.
+      video.contentHint = "motion";
 
       const constraints = videoConstraints(request.quality);
       if (constraints !== null) await video.applyConstraints(constraints);
@@ -165,6 +167,16 @@ export function createMirror(): Mirror {
       let iceRestarted = false;
 
       peer.addTrack(video, capture);
+      const videoSender = peer.getSenders().find((sender) => sender.track === video);
+      if (videoSender !== undefined) {
+        // maxBitrate afeta apenas o empacotador/encoder local; não trafega no SDP da oferta.
+        const params = videoSender.getParameters();
+        if (params.encodings === undefined || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0] = { ...params.encodings[0], ...videoEncodingParams(TARGET_BITRATE_BPS) };
+        await videoSender.setParameters(params).catch(() => undefined);
+      }
       const audio = capture.getAudioTracks()[0] ?? null;
       if (audio !== null) audioSender = peer.addTrack(audio, capture);
 
@@ -248,6 +260,16 @@ export function createMirror(): Mirror {
     try {
       // Empty constraints clear the cap; the capture may keep its current size until it changes.
       await videoTrack.applyConstraints(constraints ?? {});
+      // Reaplica o teto de bitrate fixo ao trocar a qualidade (o bitrate permanece 5 Mbps).
+      const videoSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
+      if (videoSender !== undefined) {
+        const params = videoSender.getParameters();
+        if (params.encodings === undefined || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0] = { ...params.encodings[0], ...videoEncodingParams(TARGET_BITRATE_BPS) };
+        await videoSender.setParameters(params).catch(() => undefined);
+      }
       emit({ error: null });
       return true;
     } catch (err) {

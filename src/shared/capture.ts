@@ -9,3 +9,11 @@ export function videoConstraints(quality: Quality): MediaTrackConstraints | null
   const [width, height] = quality === "1080p" ? [1920, 1080] : [1280, 720];
   return { width: { max: width }, height: { max: height }, frameRate: { max: 30 } };
 }
+
+/** Teto fixo de bitrate do encoder de vídeo do host (opção b: 1080p mantido, nunca reduzido). */
+export const TARGET_BITRATE_BPS = 5_000_000;
+
+/** Parâmetros de encoding do sender de vídeo: bitrate fixo e 30 fps, sem redução de resolução. */
+export function videoEncodingParams(maxBitrateBps: number): RTCRtpEncodingParameters {
+  return { maxBitrate: maxBitrateBps, maxFramerate: 30 };
+}

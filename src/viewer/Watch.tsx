@@ -19,6 +19,8 @@ type DebugInfo = {
   fps: number;
   kbps: number;
   lost: number;
+  framesDecoded?: number;
+  framesDropped?: number;
   audio: number | null;
 };
 
@@ -30,6 +32,8 @@ type InboundStats = RTCStats & {
   frameHeight?: number;
   framesPerSecond?: number;
   packetsLost?: number;
+  framesDecoded?: number;
+  framesDropped?: number;
   audioLevel?: number;
 };
 
@@ -305,6 +309,8 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
                 fps: Math.round(videoStats.framesPerSecond ?? 0),
                 kbps: Math.round(kbps),
                 lost: videoStats.packetsLost ?? 0,
+                framesDecoded: videoStats.framesDecoded,
+                framesDropped: videoStats.framesDropped,
                 audio: typeof audioStats?.audioLevel === "number" ? audioStats.audioLevel : null,
               });
             }
@@ -410,7 +416,7 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
             ? "waiting for media..."
             : `codec  ${stats.codec}
 video  ${stats.resolution} @ ${stats.fps} fps
-net    ${stats.kbps} kbps · ${stats.lost} lost
+net    ${stats.kbps} kbps · ${stats.lost} lost${stats.framesDecoded !== undefined ? `\ndec  ${stats.framesDecoded} decoded · ${stats.framesDropped ?? 0} dropped` : ""}
 audio  ${stats.audio === null ? "n/a" : `${Math.round(stats.audio * 100)}%`}`}
         </pre>
       )}

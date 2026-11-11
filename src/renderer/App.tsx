@@ -9,7 +9,7 @@ const DEFAULT_PORT = "4680";
 
 const QUALITY_LABELS: Record<Quality, string> = {
   native: "Native",
-  "1080p": "1080p (max)",
+  "1080p": "1080p (5 Mbps)",
   "720p": "720p (max)",
 };
 
