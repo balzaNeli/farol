@@ -1,4 +1,4 @@
-# Task List: screenmirror
+# Task List: Farol
 
 Source of truth: `SPEC.md` (rev 5, approved) and `tasks/plan.md`.
 

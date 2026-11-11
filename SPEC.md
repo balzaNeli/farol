@@ -1,4 +1,4 @@
-# SPEC: screenmirror — local Wi-Fi screen sharing (Deskreen alternative)
+# SPEC: Farol — local Wi-Fi screen sharing (Deskreen alternative)
 
 Status: **APPROVED, transport decided** (rev 5: probe evidence → Branch A, WebRTC in Silk)
 Phase: 1 of 4 (spec → plan → build → review/constraints)

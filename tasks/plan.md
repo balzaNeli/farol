@@ -1,4 +1,4 @@
-# Implementation Plan: screenmirror
+# Implementation Plan: Farol
 
 ## Overview
 

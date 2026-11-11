@@ -32,3 +32,4 @@ coverage/
 .vscode/
 *.swp
 *.swo
+.opencode/

@@ -1,4 +1,4 @@
-/* screenmirror probe — answers the branch question on the real device.
+/* Farol probe — answers the branch question on the real device.
    Plain script, no build step, no dependencies. Nothing here talks to the host.
 
    Safety rules learned the hard way on an AFTCA002 (Fire TV Stick 4K Max) on 2026-10-18:
@@ -502,4 +502,4 @@ document.getElementById("sound").addEventListener("click", function () {
   line("sound: " + (stage.muted ? "muted" : "ON — you should hear a 220 Hz hum"));
 });
 
-line("screenmirror probe ready. Press 'Run all' (checks 1-4, safe). Checks 4b and 6 ask twice: both hung a Fire TV once.");
+line("Farol probe ready. Press 'Run all' (checks 1-4, safe). Checks 4b and 6 ask twice: both hung a Fire TV once.");

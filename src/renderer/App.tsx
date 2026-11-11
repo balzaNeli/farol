@@ -186,7 +186,7 @@ export function App() {
     <main className="host">
       <header className="host-header">
         <div>
-          <h1>screenmirror</h1>
+          <h1>Farol</h1>
           <p className="muted">
             Share this screen and system audio with the Fire TV or a browser on the same Wi-Fi.
           </p>

@@ -168,7 +168,7 @@ async function start(): Promise<void> {
   await app.whenReady();
 
   if (!existsSync(hostPage) || !existsSync(preloadPath)) {
-    dialog.showErrorBox("screenmirror", "Build output is missing.\nRun: npm run build");
+    dialog.showErrorBox("Farol", "Build output is missing.\nRun: npm run build");
     app.quit();
     return;
   }
@@ -178,7 +178,7 @@ async function start(): Promise<void> {
     server = await startServer({ pairing });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    dialog.showErrorBox("screenmirror", `Could not start the LAN server: ${message}`);
+    dialog.showErrorBox("Farol", `Could not start the LAN server: ${message}`);
     app.quit();
     return;
   }
@@ -203,7 +203,7 @@ async function start(): Promise<void> {
 
   window.loadFile(hostPage).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
-    dialog.showErrorBox("screenmirror", `The host page failed to load: ${message}`);
+    dialog.showErrorBox("Farol", `The host page failed to load: ${message}`);
     app.quit();
   });
 

@@ -1,4 +1,4 @@
-# screenmirror — agent notes
+# Farol — agent notes
 
 Lan-only screen + system audio mirroring. An Electron host captures the screen and sends it over
 WebRTC to a browser viewer. The primary viewer is an Amazon Fire TV running Silk; phones/tablets

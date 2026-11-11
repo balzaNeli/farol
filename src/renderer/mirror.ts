@@ -25,7 +25,7 @@ export type Mirror = {
 export function captureErrorMessage(err: unknown): string {
   if (err instanceof DOMException) {
     if (err.name === "NotAllowedError") {
-      return "Screen capture was denied. Allow screen recording for screenmirror and try again.";
+      return "Screen capture was denied. Allow screen recording for Farol and try again.";
     }
     if (err.name === "NotFoundError") {
       return "No screen or window was available. Refresh the source list and try again.";

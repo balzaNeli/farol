@@ -97,7 +97,7 @@ function Viewer() {
   return (
     <main className="pair">
       <header className="pair-header">
-        <h1>{info?.name ?? "screenmirror"}</h1>
+        <h1>{info?.name ?? "Farol"}</h1>
         {info !== null && <span>v{info.version}</span>}
       </header>
       <p className="pair-hint">Enter the 6-digit PIN shown on the host.</p>
