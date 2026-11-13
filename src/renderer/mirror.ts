@@ -19,6 +19,11 @@ export type Mirror = {
   setQuality: (quality: Quality) => Promise<boolean>;
   handleSignal: (signal: Signal) => void;
   onChange: (listener: (state: MirrorState) => void) => void;
+  getEncoderStats: () => {
+    qualityLimitationReason: string | null;
+    framesEncoded: number;
+    totalEncodeTime: number;
+  } | null;
 };
 
 /** Browser capture errors are DOMExceptions; show the user what to do, not the exception name. */
@@ -56,6 +61,14 @@ export function createMirror(): Mirror {
   let offered = false;
   let offering = false;
   let answered = false;
+  let statsTimer: number | null = null;
+  let lastEncoderStats:
+    | (RTCOutboundRtpStreamStats & {
+        qualityLimitationReason?: string;
+        framesEncoded?: number;
+        totalEncodeTime?: number;
+      })
+    | null = null;
 
   // The host starts capture before the viewer joins (SPEC user story), so the offer waits for a
   // viewer seat instead of being dropped by the signaling server.
@@ -70,6 +83,10 @@ export function createMirror(): Mirror {
   }
 
   function release(): void {
+    if (statsTimer !== null) {
+      window.clearInterval(statsTimer);
+      statsTimer = null;
+    }
     for (const track of stream?.getTracks() ?? []) track.stop();
     audioSender = null;
     audioTrack = null;
@@ -98,6 +115,28 @@ export function createMirror(): Mirror {
 
   function stopped(): MirrorResult {
     return { ok: false, error: "cancelled" };
+  }
+
+  /**
+   * Aplica o teto de bitrate fixo ao sender de vídeo. `native` deixa a fonte em paz:
+   * não injeta maxFramerate nem maxBitrate via setParameters.
+   * Trata params.encodings vazio (antes da negociação SDP) injetando um encoding vazio.
+   */
+  async function applyVideoBitrateCap(
+    sender: RTCRtpSender,
+    maxBitrateBps: number,
+    quality: Quality,
+  ): Promise<void> {
+    if (quality === "native") return; // deixe a fonte em paz
+    const params = sender.getParameters();
+    if (!(params.encodings?.length)) {
+      params.encodings = [{}];
+    }
+    params.encodings[0] = {
+      ...params.encodings[0],
+      ...videoEncodingParams(maxBitrateBps),
+    };
+    await sender.setParameters(params);
   }
 
   async function offer(restart = false): Promise<boolean> {
@@ -170,12 +209,34 @@ export function createMirror(): Mirror {
       const videoSender = peer.getSenders().find((sender) => sender.track === video);
       if (videoSender !== undefined) {
         // maxBitrate afeta apenas o empacotador/encoder local; não trafega no SDP da oferta.
-        const params = videoSender.getParameters();
-        if (params.encodings === undefined || params.encodings.length === 0) {
-          params.encodings = [{}];
+        try {
+          await applyVideoBitrateCap(videoSender, TARGET_BITRATE_BPS, request.quality);
+        } catch (err) {
+          // Não impede o início da transmissão: apenas aviso não-crítico para a UI.
+          const message = err instanceof Error ? err.message : String(err);
+          emit({ error: `Bitrate cap not applied: ${message}` });
         }
-        params.encodings[0] = { ...params.encodings[0], ...videoEncodingParams(TARGET_BITRATE_BPS) };
-        await videoSender.setParameters(params).catch(() => undefined);
+
+        // Instrumentação do encoder: outbound-rtp expõe qualityLimitationReason, framesEncoded,
+        // totalEncodeTime. qualityLimitationReason === "cpu" aponta para encoder do Windows;
+        // "none" significa que o host não está limitado localmente. Últimas stats ficam
+        // disponíveis em lastEncoderStats para diagnóstico.
+        statsTimer = window.setInterval(async () => {
+          try {
+            const report = await videoSender.getStats();
+            report.forEach((entry) => {
+              if (entry.type === "outbound-rtp" && entry.kind === "video") {
+                lastEncoderStats = entry as RTCOutboundRtpStreamStats & {
+                  qualityLimitationReason?: string;
+                  framesEncoded?: number;
+                  totalEncodeTime?: number;
+                };
+              }
+            });
+          } catch {
+            // stats são best-effort; uma conexão fechada rejeita getStats()
+          }
+        }, 1000);
       }
       const audio = capture.getAudioTracks()[0] ?? null;
       if (audio !== null) audioSender = peer.addTrack(audio, capture);
@@ -263,12 +324,13 @@ export function createMirror(): Mirror {
       // Reaplica o teto de bitrate fixo ao trocar a qualidade (o bitrate permanece 5 Mbps).
       const videoSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
       if (videoSender !== undefined) {
-        const params = videoSender.getParameters();
-        if (params.encodings === undefined || params.encodings.length === 0) {
-          params.encodings = [{}];
+        try {
+          await applyVideoBitrateCap(videoSender, TARGET_BITRATE_BPS, quality);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          emit({ error: `Could not change quality to ${quality}: ${message}` });
+          return false;
         }
-        params.encodings[0] = { ...params.encodings[0], ...videoEncodingParams(TARGET_BITRATE_BPS) };
-        await videoSender.setParameters(params).catch(() => undefined);
       }
       emit({ error: null });
       return true;
@@ -309,6 +371,14 @@ export function createMirror(): Mirror {
     onChange: (listener) => {
       listeners.add(listener);
       listener(state);
+    },
+    getEncoderStats: () => {
+      if (lastEncoderStats === null) return null;
+      return {
+        qualityLimitationReason: lastEncoderStats.qualityLimitationReason ?? null,
+        framesEncoded: lastEncoderStats.framesEncoded ?? 0,
+        totalEncodeTime: lastEncoderStats.totalEncodeTime ?? 0,
+      };
     },
   };
 }
