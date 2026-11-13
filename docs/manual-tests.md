@@ -209,8 +209,21 @@ TV-specific rows stay open for the final acceptance.
 | 11 | Host Stop ends playback within 1 s; viewer shows "host stopped" | |
 | 12 | Wrong PIN → error text; the third failure shows the 60 s lockout time | |
 | 13 | Re-pair after Stop works without reloading the viewer | |
-| 14 | Wi-Fi drop → reconnect prompt appears, re-pair succeeds | |
+| 14 | Wi-Fi drop → reconnect prompt appears, re-pair succeeds | Physical run 2026-11-13 on `AFTCA002`: 15 s Wi-Fi drop → ICE restart failed as expected → reconnect screen → PIN pad → re-pair OK without page reload | Verified on `AFTCA002` |
 | 15 | Fire TV Back exits the viewer without leaving a stalled stream | |
+
+### 1080p30 capture-path comparison (Fire TV AFTCA002, 2026-11-13)
+
+A execução física isolou a causa dos 17 fps: não é o encoder do PC nem o decoder da TV (zero quadros descartados/congelados em ambos). O limite ocorre exclusivamente na **captura de janela específica** no Windows (caminho HWND/WGC do Chromium aguardando atualização da janela, diferente da captura de tela inteira via DXGI Desktop Duplication).
+
+| Caminho de captura | Resolução | FPS estável | Bitrate | lost | dropped | freeze | interFrameDelay |
+|---|---|---|---|---|---|---|---|
+| Tela inteira (DXGI Desktop Duplication) | 1920x1080 @ 30 | **~26–30 fps** | 5061 kbps | 0 | 0 | 0 | ~39.4 ms |
+| Janela específica (HWND/WGC) | 1920x1080 @ 30 | **~17 fps** | 4664 kbps | 0 | 0 | 0 | 9.4 → ~86.3 ms |
+
+**Conclusão:** 1080p30 funciona de forma estável na **captura de tela inteira**. Na **captura de janela específica** no Windows, o compositor limita a ~17 fps independentemente do teto de bitrate de 5 Mbps ou do `contentHint = "motion"`. Não é um problema de transporte WebRTC nem de decodificação na Fire TV.
+
+**Impacto no produto:** o limite da captura de janela é um comportamento do Windows/Chromium, não do Farol. A captura de tela inteira atende ao requisito de 1080p30.
 
 ## Task 11 — host UI (2026-10-19 CDP; phone scan 2026-10-22)
 
@@ -286,10 +299,10 @@ the run that closes the open rows.
 | # | Criterion | Evidence | Status |
 |---|---|---|---|
 | 1 | Host UI shows every LAN URL, a QR code and a 6-digit PIN | Task 11 "Host state" and "PIN rotation"; `tests/qr.test.ts`; phone scan | Verified |
-| 2 | First rendered frame within 3 s of a valid PIN | Probe check 4 measured 942 ms on a same-device loopback; Checkpoint 3 was not stopwatch-timed | Not verified: real-network first frame unmeasured |
+| 2 | First rendered frame within 3 s of a valid PIN | Physical run 2026-11-13 on `AFTCA002`: 1 s from PIN submit to first frame on full-screen capture | Verified on `AFTCA002` |
 | 3 | Glass-to-glass latency <= 250 ms at 1080p30 | Requires filming a millisecond stopwatch; not measured | Not verified |
 | 4 | Fire TV pairing with the remote alone, Enter on the 6th digit | Checkpoint 3 "Pairing / remote-only: pass"; Task 10 keyboard-only pairing; Task 12 Enter reveal/guard | Verified on `AFTCA002` |
-| 5 | H.264 negotiated and playback holds 1080p30 with no dropped-frame growth | Probe check 4 and Task 10 `?debug=1` show H.264; Checkpoint 3 streamed 1080p30 but recorded no steady fps/dropped-frame numbers | Not verified: steady 1080p30 and dropped-frame growth; H.264 part verified |
+| 5 | H.264 negotiated and playback holds 1080p30 with no dropped-frame growth | Physical run 2026-11-13 on `AFTCA002`: H.264 negotiated. Full-screen capture (DXGI Desktop Duplication): ~26–30 fps stable, 5061 kbps, 0 lost, 0 dropped, freeze 0, interFrameDelay ~39.4 ms. Window-specific capture (HWND/WGC on Windows): ~17 fps, 4664 kbps, interFrameDelay 9.4→86.3 ms — Windows/Chromium compositor limit, not encoder or decoder (zero frames dropped/frozen on both). | Verified: full-screen capture holds 1080p30; window-specific capture is Windows-limited to ~17 fps |
 | 6 | Fullscreen, no crop of host edges, all controls remote-reachable | Task 12 overscan (829x844 in 921x936) and `f` fullscreen in Edge; Checkpoint 3 remote controls | Not verified on Fire TV: real overscan/crop not measured; Edge pass |
 | 7 | Host sound heard on the viewer within 1 s, in sync | Checkpoint 3 audible; no stopwatch or click-track measurement | Not verified: timing/sync not measured |
 | 8 | Viewer mute restores; host audio off stops viewer audio within 1 s | Task 10 mute; Task 9 host audio off/on; Task 11 host switch; no 1 s stopwatch | Not verified: 1 s bound not measured; functional path works |
