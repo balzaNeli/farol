@@ -14,7 +14,12 @@ export function videoConstraints(quality: Quality): MediaTrackConstraints | null
 export const TARGET_BITRATE_BPS = 5_000_000;
 
 /** Parâmetros de encoding do sender de vídeo: bitrate fixo, 30 fps, sem redução de resolução (opção b). */
-export function videoEncodingParams(maxBitrateBps: number): RTCRtpEncodingParameters {
+export type VideoEncodingParams = RTCRtpEncodingParameters & {
+  degradationPreference: "maintain-resolution" | "maintain-framerate" | "balanced";
+  scaleResolutionDownBy: number;
+};
+
+export function videoEncodingParams(maxBitrateBps: number): VideoEncodingParams {
   return {
     maxBitrate: maxBitrateBps,
     maxFramerate: 30,

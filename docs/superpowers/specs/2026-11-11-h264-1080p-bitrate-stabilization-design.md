@@ -82,6 +82,12 @@ Isso ocorre:
 
 O `setParameters` retorna uma `Promise`; falhas aqui são best-effort (não devem derrubar a captura, apenas logar via `emit` de erro não crítico).
 
+**Decisões de design tomadas durante a implementação:**
+
+1. **Falha no teto de bitrate no `start()` não aborta o stream.** Se `applyVideoBitrateCap` falhar (ex. Chromium rejeita `maxBitrate`), `start()` emite um erro não-crítico via `emit({ error: `Bitrate cap not applied: ...` })` mas continua normalmente e retorna `{ ok: true }`. A transmissão começa sem o teto de 5 Mbps, mas não é impedida de iniciar. Isso prioriza a disponibilidade do stream sobre o teto absoluto no caminho de inicialização.
+
+2. **O preset `native` não impõe limite de framerate/bitrate no sender.** Quando `quality === "native"`, o helper `applyVideoBitrateCap` retorna cedo sem injetar `maxBitrate` nem `maxFramerate` via `setParameters`, deixando a fonte exatamente como entregue pelo `getDisplayMedia`. Isso é intencional: `"native"` significa "deixe a fonte em paz" (conforme comentário em `capture.ts`), e o teto de 5 Mbps só se aplica a `"1080p"` e `"720p"`.
+
 ### 7.3 `src/viewer/Watch.tsx` — telemetria de decodação (debug only)
 
 O bloco `?debug=1` já lê `inbound-rtp` de vídeo e extrai `codec`, `resolution`, `fps`, `kbps`, `lost`. Acrescentar:
@@ -99,14 +105,26 @@ O seletor de qualidade já existe (`native`, `1080p`, `720p`). Não adicionar no
 1. Editar `src/shared/capture.ts`: adicionar `TARGET_BITRATE_BPS` e `videoEncodingParams`.
 2. Editar `src/renderer/mirror.ts`:
    - Mudar `video.contentHint = "detail"` para `video.contentHint = "motion"` (linha ~151).
-   - Aplicar `setParameters` com `videoEncodingParams(TARGET_BITRATE_BPS)` no sender de vídeo em `start()` (obtendo primeiro via `getParameters()`, injetando `maxBitrate` na array `encodings`, aplicando de volta).
-   - Reaplicar `setParameters` no `setQuality()`.
+   - Criar helper `applyVideoBitrateCap(sender, maxBitrateBps, quality)` que: (i) retorna cedo se `quality === "native"`; (ii) obtém `getParameters()`; (iii) injeta `maxBitrate` em `params.encodings[0]` (injetando `[{}]` se o array estiver vazio); (iv) chama `setParameters()`.
+   - Chamar o helper em `start()` dentro de `try/catch`: falha emite erro não-crítico via `emit` mas não impede o início da transmissão (retorna `ok: true`).
+   - Chamar o helper em `setQuality()` dentro de `try/catch`: falha emite erro e retorna `false` (reverte o rótulo na UI).
 3. Editar `src/viewer/Watch.tsx`: acrescentar `framesDecoded` e `framesDropped` ao `InboundStats` e ao `DebugInfo`, ler do `videoStats` e exibir no debug.
 4. (Opcional) Editar `src/renderer/App.tsx`: ajustar label de qualidade para refletir bitrate fixo.
 5. Rodar `npm run verify` (lint + test + coverage + build + `check:gates`) e `npx tsc -p tsconfig.json`.
 6. Verificar que `check:gates` ainda passa (sem `iceServers:` preenchido, sem capture APIs no `src/viewer`).
 
-## 9. Aprovação
+## 9. Aceitação de Testes Manuais
+
+### Aceitação 1080p30 + Queda de Wi-Fi (2026-11-13)
+
+- **Hardware:** Host Windows (branch `dev`, commit `<hash>`) → Fire TV `AFTCA002` (Silk)
+- **Codec / Resolução / FPS:** H.264, 1920x1080 @ `17` fps estáveis (bitrate observado: `~4,5` Mbps)
+- **Tempo até o primeiro frame:** `1` s
+- **Troca de qualidade ao vivo:** `1080p30` ↔ `720p30` ↔ `native` OK (sem erros de `setParameters`)
+- **Queda de Wi-Fi (15s):** Reinício de ICE falhou conforme esperado → tela de reconectar → retorno ao PIN pad → reemparelhamento OK sem reload da página
+- **Resultado:** FALHOU (notas: `não ficou estável em 30 fps a 1080p`)
+
+## 10. Aprovação
 
 Este design doc cobre a Abordagem A e as partes do how já decididas. Nenhum código de produto será escrito até que você aprove.
 

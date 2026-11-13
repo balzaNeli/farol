@@ -163,8 +163,7 @@ where it breaks:
   to need a power cycle (an MSE chunk-streaming test and a WebRTC one). The device has no headroom
   for anything beyond decode-and-display, which is exactly what it does here. See
   `docs/manual-tests.md`.
-- **The receive ceiling is not locked yet:** Checkpoint 3 streamed 1080p30, but it does not hold a
-  steady 30 fps; 720p30 is the fallback. Tuning is a Task 14 follow-up.
+- **1080p30 works on full-screen capture:** ~26–30 fps stable, ~5 Mbps, zero dropped frames (measured on Fire TV `AFTCA002` with Silk). On **window-specific capture** on Windows, the Chromium compositor (HWND/WGC path) caps at ~17 fps with `interFrameDelay` rising from ~9 ms to ~86 ms — it is neither the PC encoder nor the TV decoder (zero frames dropped or frozen on both). The 5 Mbps bitrate cap and `contentHint = "motion"` are already applied; this is Windows/Chromium behavior, not Farol. See `docs/manual-tests.md` for the exact numbers. 720p30 remains the fallback.
 - **System audio is Windows-only** and it is the **whole system mix**, not per application:
   sharing one window still sends every notification sound. The UI does not pretend otherwise.
 - **`navigator.mediaDevices` is hidden** in Silk, so any future viewer-side capture (voice,

@@ -167,8 +167,7 @@ espelhamento é onde ela quebra:
   o suficiente para precisar de um ciclo de energia (um teste de streaming por chunk MSE e um WebRTC).
   O dispositivo não tem folga para nada além de decodificar-e-exibir, que é exatamente o que ele faz
   aqui. Veja `docs/manual-tests.md`.
-- **O teto de recebimento ainda não está travado:** o Checkpoint 3 transmitiu 1080p30, mas não segura
-  30 fps estável; 720p30 é o fallback. Ajuste é um acompanhamento da Tarefa 14.
+- **1080p30 funciona na captura de tela inteira:** ~26–30 fps estáveis, ~5 Mbps, 0 quadros descartados (medido na Fire TV `AFTCA002` com Silk). Na **captura de janela específica** no Windows, o compositor do Chromium (caminho HWND/WGC) limita a ~17 fps com `interFrameDelay` subindo de ~9 ms para ~86 ms — não é o encoder do PC nem o decoder da TV (zero quadros descartados ou congelados em ambos). O teto de 5 Mbps e o `contentHint = "motion"` já estão aplicados; este é um comportamento do Windows/Chromium, não do Farol. Veja `docs/manual-tests.md` para os números exatos. 720p30 segue como fallback.
 - **Áudio do sistema é apenas no Windows** e é a **mixagem de todo o sistema**, não por aplicativo:
   compartilhar uma janela ainda envia cada som de notificação. A IU não finge o contrário.
 - **`navigator.mediaDevices` está escondido** no Silk, então qualquer captura futura do lado do

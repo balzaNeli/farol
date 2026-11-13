@@ -4,6 +4,8 @@ Lan-only screen + system audio mirroring. An Electron host captures the screen a
 WebRTC to a browser viewer. The primary viewer is an Amazon Fire TV running Silk; phones/tablets
 are secondary. Nothing ever leaves the local network — no STUN, no TURN, no cloud.
 
+Read CONSTRAINTS.md before writing code. Do not weaken it to make a change pass.
+
 `SPEC.md` (rev 5, approved) is the source of truth for behaviour, `tasks/plan.md` maps phases and
 checkpoints, `tasks/todo.md` holds the per-task acceptance criteria. Spec first, then tasks, then
 code — and keep all three in step with the code: commits name the spec task they implement.
