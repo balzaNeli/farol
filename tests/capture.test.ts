@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { videoConstraints } from "../src/shared/capture.ts";
+import { videoConstraints, videoEncodingParams } from "../src/shared/capture.ts";
 
 test("videoConstraints caps the capture instead of asking for an exact size", () => {
   assert.equal(videoConstraints("native"), null);
@@ -23,4 +23,12 @@ test("videoConstraints emits only upper bounds, never min or exact", () => {
     assert.equal(text.includes('"min"'), false, quality);
     assert.equal(text.includes('"exact"'), false, quality);
   }
+});
+
+test("videoEncodingParams sets maintain-resolution + scaleResolutionDownBy 1.0 (opção b)", () => {
+  const params = videoEncodingParams(5_000_000);
+  assert.equal(params.maxBitrate, 5_000_000);
+  assert.equal(params.maxFramerate, 30);
+  assert.equal(params.degradationPreference, "maintain-resolution");
+  assert.equal(params.scaleResolutionDownBy, 1.0);
 });
