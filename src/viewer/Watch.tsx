@@ -21,6 +21,8 @@ type DebugInfo = {
   lost: number;
   framesDecoded?: number;
   framesDropped?: number;
+  freezeCount?: number;
+  totalInterFrameDelay?: number;
   audio: number | null;
 };
 
@@ -34,6 +36,8 @@ type InboundStats = RTCStats & {
   packetsLost?: number;
   framesDecoded?: number;
   framesDropped?: number;
+  freezeCount?: number;
+  totalInterFrameDelay?: number;
   audioLevel?: number;
 };
 
@@ -311,6 +315,8 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
                 lost: videoStats.packetsLost ?? 0,
                 framesDecoded: videoStats.framesDecoded,
                 framesDropped: videoStats.framesDropped,
+                freezeCount: videoStats.freezeCount,
+                totalInterFrameDelay: videoStats.totalInterFrameDelay,
                 audio: typeof audioStats?.audioLevel === "number" ? audioStats.audioLevel : null,
               });
             }
@@ -416,7 +422,7 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
             ? "waiting for media..."
             : `codec  ${stats.codec}
 video  ${stats.resolution} @ ${stats.fps} fps
-net    ${stats.kbps} kbps · ${stats.lost} lost${stats.framesDecoded !== undefined ? `\ndec  ${stats.framesDecoded} decoded · ${stats.framesDropped ?? 0} dropped` : ""}
+net    ${stats.kbps} kbps · ${stats.lost} lost${stats.framesDecoded !== undefined ? `\ndec  ${stats.framesDecoded} decoded · ${stats.framesDropped ?? 0} dropped · freeze ${stats.freezeCount ?? 0} · interFrameDelay ${stats.totalInterFrameDelay ?? 0}ms` : ""}
 audio  ${stats.audio === null ? "n/a" : `${Math.round(stats.audio * 100)}%`}`}
         </pre>
       )}
