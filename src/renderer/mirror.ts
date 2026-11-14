@@ -24,6 +24,7 @@ export type Mirror = {
     framesEncoded: number;
     totalEncodeTime: number;
   } | null;
+  getSurfaceType: () => "screen" | "window" | null;
 };
 
 /** Browser capture errors are DOMExceptions; show the user what to do, not the exception name. */
@@ -62,6 +63,7 @@ export function createMirror(): Mirror {
   let offering = false;
   let answered = false;
   let statsTimer: number | null = null;
+  let lastSurfaceType: "screen" | "window" | null = null;
   let lastEncoderStats:
     | (RTCOutboundRtpStreamStats & {
         qualityLimitationReason?: string;
@@ -87,6 +89,7 @@ export function createMirror(): Mirror {
       window.clearInterval(statsTimer);
       statsTimer = null;
     }
+    lastSurfaceType = null;
     for (const track of stream?.getTracks() ?? []) track.stop();
     audioSender = null;
     audioTrack = null;
@@ -190,6 +193,10 @@ export function createMirror(): Mirror {
       // "motion" instrui o Chromium a derrubar qualidade visual, não quadros, quando o encoder
       // estiver pressionado. Complementa o teto de bitrate fixo (5 Mbps) sem reduzir a resolução.
       video.contentHint = "motion";
+
+      // Detecta se a fonte capturada é uma janela específica (não a tela inteira) para o aviso
+      // de ~17 fps no Windows (Wayland/HWND path do Chromium limita janelas específicas).
+      lastSurfaceType = video.getSettings().displaySurface === "window" ? "window" : "screen";
 
       const constraints = videoConstraints(request.quality);
       if (constraints !== null) await video.applyConstraints(constraints);
@@ -380,5 +387,6 @@ export function createMirror(): Mirror {
         totalEncodeTime: lastEncoderStats.totalEncodeTime ?? 0,
       };
     },
+    getSurfaceType: () => lastSurfaceType,
   };
 }

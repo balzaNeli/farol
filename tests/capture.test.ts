@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { videoConstraints, videoEncodingParams } from "../src/shared/capture.ts";
+import {
+  videoConstraints,
+  videoEncodingParams,
+  isWindowSurface,
+} from "../src/shared/capture.ts";
 
 test("videoConstraints caps the capture instead of asking for an exact size", () => {
   assert.equal(videoConstraints("native"), null);
@@ -31,4 +35,11 @@ test("videoEncodingParams sets maintain-resolution + scaleResolutionDownBy 1.0 (
   assert.equal(params.maxFramerate, 30);
   assert.equal(params.degradationPreference, "maintain-resolution");
   assert.equal(params.scaleResolutionDownBy, 1.0);
+});
+
+test("isWindowSurface returns true only for 'window'", () => {
+  assert.equal(isWindowSurface("window"), true);
+  assert.equal(isWindowSurface("screen"), false);
+  assert.equal(isWindowSurface(null), false);
+  assert.equal(isWindowSurface(undefined), false);
 });

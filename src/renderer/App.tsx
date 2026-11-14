@@ -56,6 +56,7 @@ export function App() {
   const [audioSupported, setAudioSupported] = useState<boolean | null>(null);
   const [state, setState] = useState<MirrorState>({ status: "idle", error: null, audio: false });
   const [notice, setNotice] = useState<string | null>(null);
+  const [windowModeNotice, setWindowModeNotice] = useState<string | null>(null);
   const engineActive =
     state.status === "live" || state.status === "waiting" || state.status === "reconnecting";
 
@@ -108,6 +109,7 @@ export function App() {
 
   async function start(): Promise<void> {
     setNotice(null);
+    setWindowModeNotice(null);
     try {
       const result = await mirror.start({ sourceId, quality, audio: audioOn });
       if (!result.ok) return;
@@ -116,6 +118,18 @@ export function App() {
         setAudioOn(false);
         setNotice("This system did not provide system audio. The video is streaming without it.");
       }
+      // Aviso discreto: captura de janela específica no Windows pode limitar a ~17 fps.
+      const surface = mirror.getSurfaceType();
+      const isWindows = /Windows/.test(navigator.userAgent);
+      if (
+        isWindows &&
+        surface === "window" &&
+        (quality === "1080p" || quality === "native")
+      ) {
+        setWindowModeNotice(
+          "Window capture on Windows may limit the stream to ~17 fps. Use Full Screen for stable 30 fps.",
+        );
+      }
     } catch (err) {
       setNotice(`Could not start capture: ${errorText(err)}`);
     }
@@ -123,6 +137,7 @@ export function App() {
 
   function stop(): void {
     setNotice(null);
+    setWindowModeNotice(null);
     mirror.stop();
   }
 
@@ -158,6 +173,8 @@ export function App() {
         setQuality(previous);
         return;
       }
+      // O aviso só se aplica a 1080p/native; ao mudar para 720p ele some.
+      if (next === "720p") setWindowModeNotice(null);
     } catch (err) {
       setQuality(previous);
       setNotice(`Could not change quality: ${errorText(err)}`);
@@ -291,6 +308,11 @@ export function App() {
         {notice !== null && (
           <p className="message is-notice" role="status">
             {notice}
+          </p>
+        )}
+        {windowModeNotice !== null && (
+          <p className="message is-notice" role="status">
+            {windowModeNotice}
           </p>
         )}
         {audioSupported === null && <p className="muted">Checking system audio support...</p>}
