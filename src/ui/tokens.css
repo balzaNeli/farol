@@ -1,0 +1,181 @@
+/* Farol — design tokens (DESIGN.md, adaptado ao domínio).
+ *
+ * Importado por src/renderer/host.css e src/viewer/viewer.css.
+ * Nenhuma fonte de rede: pilha do sistema apenas. CSP-compatível (CSS estático).
+ */
+
+/* ===== Cores ===== */
+:root {
+  --farol-color-primary: #0066cc;
+  --farol-color-primary-focus: #0071e3;
+  --farol-color-primary-on-dark: #2997ff;
+  --farol-color-ink: #1d1d1f;
+  --farol-color-body: #1d1d1f;
+  --farol-color-body-on-dark: #ffffff;
+  --farol-color-body-muted: #cccccc;
+  --farol-color-ink-muted-80: #333333;
+  --farol-color-ink-muted-48: #7a7a7a;
+  --farol-color-divider-soft: #f0f0f0;
+  --farol-color-hairline: #e0e0e0;
+  --farol-color-canvas: #ffffff;
+  --farol-color-canvas-parchment: #f5f5f7;
+  --farol-color-surface-pearl: #fafafc;
+  --farol-color-surface-tile-1: #272729;
+  --farol-color-surface-tile-2: #2a2a2c;
+  --farol-color-surface-tile-3: #252527;
+  --farol-color-surface-black: #000000;
+  --farol-color-surface-chip-translucent: #d2d2d7;
+  --farol-color-on-primary: #ffffff;
+  --farol-color-on-dark: #ffffff;
+
+  /* ===== Tipografia (sistema, sem rede) ===== */
+  --farol-font-display: "SF Pro Display", system-ui, -apple-system, sans-serif;
+  --farol-font-text: "SF Pro Text", system-ui, -apple-system, sans-serif;
+
+  /* ===== Espaçamento ===== */
+  --farol-space-xxs: 4px;
+  --farol-space-xs: 8px;
+  --farol-space-sm: 12px;
+  --farol-space-md: 17px;
+  --farol-space-lg: 24px;
+  --farol-space-xl: 32px;
+  --farol-space-xxl: 48px;
+  --farol-space-section: 80px;
+
+  /* ===== Raio ===== */
+  --farol-rounded-none: 0px;
+  --farol-rounded-xs: 5px;
+  --farol-rounded-sm: 8px;
+  --farol-rounded-md: 11px;
+  --farol-rounded-lg: 18px;
+  --farol-rounded-pill: 9999px;
+  --farol-rounded-full: 9999px;
+
+  /* ===== Transição ===== */
+  --farol-transition: 150ms ease;
+}
+
+/* ===== Utilitários de superfície ===== */
+.farol-surface-parchment {
+  background: var(--farol-color-canvas-parchment);
+  color: var(--farol-color-ink);
+}
+
+.farol-surface-canvas {
+  background: var(--farol-color-canvas);
+  color: var(--farol-color-ink);
+}
+
+.farol-surface-tile-dark {
+  background: var(--farol-color-surface-tile-1);
+  color: var(--farol-color-body-on-dark);
+}
+
+.farol-surface-black {
+  background: var(--farol-color-surface-black);
+  color: var(--farol-color-body-on-dark);
+}
+
+/* ===== Utilitários de texto ===== */
+.farol-text-ink { color: var(--farol-color-ink); }
+.farol-text-body-muted { color: var(--farol-color-body-muted); }
+.farol-text-ink-muted-80 { color: var(--farol-color-ink-muted-80); }
+.farol-text-ink-muted-48 { color: var(--farol-color-ink-muted-48); }
+.farol-text-on-dark { color: var(--farol-color-body-on-dark); }
+.farol-text-primary { color: var(--farol-color-primary); }
+.farol-text-primary-on-dark { color: var(--farol-color-primary-on-dark); }
+
+.farol-font-display { font-family: var(--farol-font-display); }
+.farol-font-text { font-family: var(--farol-font-text); }
+
+/* ===== Componentes ===== */
+.farol-card {
+  background: var(--farol-color-canvas);
+  border: 1px solid var(--farol-color-hairline);
+  border-radius: var(--farol-rounded-lg);
+  padding: var(--farol-space-lg);
+}
+
+.farol-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--farol-color-canvas);
+  border: 1px solid var(--farol-color-hairline);
+  border-radius: var(--farol-rounded-pill);
+  padding: 12px 16px;
+  font-family: var(--farol-font-text);
+  font-size: 14px;
+  line-height: 1.43;
+  letter-spacing: -0.224px;
+  color: var(--farol-color-ink);
+}
+
+.farol-chip.selected {
+  border-color: var(--farol-color-primary-focus);
+}
+
+.farol-button-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--farol-color-primary);
+  border: none;
+  border-radius: var(--farol-rounded-pill);
+  padding: 11px 22px;
+  font-family: var(--farol-font-text);
+  font-size: 17px;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--farol-color-on-primary);
+  cursor: pointer;
+  transition: transform var(--farol-transition);
+}
+
+.farol-button-primary:active {
+  transform: scale(0.95);
+}
+
+.farol-button-primary:focus-visible {
+  outline: 2px solid var(--farol-color-primary-focus);
+  outline-offset: 2px;
+}
+
+.farol-button-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.farol-button-icon {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(210, 210, 215, 0.64);
+  border: none;
+  border-radius: var(--farol-rounded-full);
+  color: var(--farol-color-ink);
+  cursor: pointer;
+  transition: transform var(--farol-transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.farol-button-icon:active {
+  transform: scale(0.95);
+}
+
+.farol-button-icon:focus-visible {
+  outline: 2px solid var(--farol-color-primary-focus);
+  outline-offset: 2px;
+}
+
+.farol-hairline {
+  border: 1px solid var(--farol-color-hairline);
+}
+
+.farol-divider-soft {
+  border-color: var(--farol-color-divider-soft);
+}
