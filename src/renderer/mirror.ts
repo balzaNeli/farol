@@ -17,6 +17,18 @@ export type MirrorResult =
   | { ok: true; stream: MediaStream; audio: boolean }
   | { ok: false; error: string };
 
+/** RTCRtpSendParameters com campos que o Chromium lê no nível de cima de params. */
+type RtcSenderParams = RTCRtpSendParameters & {
+  degradationPreference?: "maintain-resolution" | "maintain-framerate" | "balanced";
+  scaleResolutionDownBy?: number;
+};
+
+/** RTCRtpEncodingParameters com campos que o Chromium ignora dentro de encodings[0]. */
+type RtcEncodingParams = RTCRtpEncodingParameters & {
+  degradationPreference?: "maintain-resolution" | "maintain-framerate" | "balanced";
+  scaleResolutionDownBy?: number;
+};
+
 export type Mirror = {
   start: (request: StartRequest) => Promise<MirrorResult>;
   stop: () => void;
@@ -199,18 +211,26 @@ export function createMirror(): Mirror {
     maxBitrateBps: number,
     quality: Quality,
   ): Promise<void> {
-    const params = sender.getParameters();
+    const params = sender.getParameters() as RtcSenderParams;
     if (!(params.encodings?.length)) {
       params.encodings = [{}];
     }
-    const encoding = params.encodings[0]!;
+    const encoding = params.encodings[0]! as RtcEncodingParams;
     if (quality === "native") {
       // native não impõe teto: remove limites aplicados anteriormente (1080p/720p)
       encoding.maxBitrate = undefined;
       encoding.maxFramerate = undefined;
     } else {
       Object.assign(encoding, videoEncodingParams(maxBitrateBps));
+      // degradationPreference e scaleResolutionDownBy pertencem ao nível de cima
+      // de params (o Chromium os ignora dentro de encodings[0]); removem de encodings[0].
+      delete encoding.degradationPreference;
+      delete encoding.scaleResolutionDownBy;
     }
+    // degradationPreference e scaleResolutionDownBy ficam no nível de cima de params;
+    // o Chromium ignora o campo dentro de encodings[0].
+    params.degradationPreference = "maintain-resolution";
+    params.scaleResolutionDownBy = 1.0;
     await sender.setParameters(params);
   }
 
@@ -265,9 +285,10 @@ export function createMirror(): Mirror {
 
       const video = capture.getVideoTracks()[0];
       if (video === undefined) throw new Error("display capture returned no video track");
-      // "motion" instrui o Chromium a derrubar qualidade visual, não quadros, quando o encoder
-      // estiver pressionado. Complementa o teto de bitrate fixo (5 Mbps) sem reduzir a resolução.
-      video.contentHint = "motion";
+      // "detail" instrui o Chromium a manter qualidade visual, não derrubar
+      // resolução nem fps, quando o encoder estiver pressionado. Complementa o
+      // teto de bitrate fixo (5 Mbps) sem reduzir a resolução (opção b).
+      video.contentHint = "detail";
 
       // Detecta se a fonte capturada é uma janela específica (não a tela inteira) para o aviso
       // de ~17 fps no Windows (Wayland/HWND path do Chromium limita janelas específicas).

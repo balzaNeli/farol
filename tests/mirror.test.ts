@@ -462,3 +462,49 @@ test("start(): aviso de bitrate cap não é sobrescrito por error: null ao entra
     });
   });
 });
+
+test("applyVideoBitrateCap: degradationPreference no nível de cima de params, não só em encodings[0]", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+
+  let capturedParams: unknown = null;
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+  const RealRTCPC = globalThis.RTCPeerConnection;
+  Object.defineProperty(globalThis, "RTCPeerConnection", {
+    value: class {
+      constructor() {
+        const pc = fakePC();
+        const sender = pc.addTrack(video);
+        sender.setParameters = async (_p: unknown) => {
+          capturedParams = _p;
+        };
+        return pc;
+      }
+    } as unknown,
+    writable: true,
+    configurable: true,
+  });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+
+  const started = await mirror.start({ sourceId: "screen", quality: "1080p", audio: false });
+  assert.equal(started.ok, true);
+
+  const params = capturedParams as { encodings: Array<Record<string, unknown>>; degradationPreference?: string; scaleResolutionDownBy?: number } | null;
+  assert.equal(params?.degradationPreference, "maintain-resolution", "degradationPreference deve estar no nível de cima de params");
+  assert.equal(params?.scaleResolutionDownBy, 1.0, "scaleResolutionDownBy deve estar no nível de cima de params");
+  assert.equal(params?.encodings[0]?.degradationPreference, undefined, "degradationPreference não deve ficar só dentro de encodings[0]");
+
+  t.after(() => {
+    resetMocks();
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      value: RealRTCPC,
+      writable: true,
+      configurable: true,
+    });
+  });
+});
