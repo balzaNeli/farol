@@ -7,7 +7,7 @@ import type { Quality } from "./ipc.ts";
 export function videoConstraints(quality: Quality): MediaTrackConstraints | null {
   if (quality === "native") return null;
   const [width, height] = quality === "1080p" ? [1920, 1080] : [1280, 720];
-  return { width: { max: width }, height: { max: height }, frameRate: { max: 30 } };
+  return { width: { max: width }, height: { max: height }, frameRate: { ideal: 30, max: 30 } };
 }
 
 /** Teto fixo de bitrate do encoder de vídeo do host (opção b: 1080p mantido, nunca reduzido). */

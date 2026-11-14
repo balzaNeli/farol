@@ -12,12 +12,12 @@ test("videoConstraints caps the capture instead of asking for an exact size", ()
   assert.deepEqual(videoConstraints("1080p"), {
     width: { max: 1920 },
     height: { max: 1080 },
-    frameRate: { max: 30 },
+    frameRate: { ideal: 30, max: 30 },
   });
   assert.deepEqual(videoConstraints("720p"), {
     width: { max: 1280 },
     height: { max: 720 },
-    frameRate: { max: 30 },
+    frameRate: { ideal: 30, max: 30 },
   });
 });
 

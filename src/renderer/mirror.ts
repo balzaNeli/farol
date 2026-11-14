@@ -6,7 +6,12 @@ import { RTC_CONFIG } from "../shared/rtc.ts";
 
 export type MirrorStatus = "idle" | "starting" | "waiting" | "live" | "reconnecting" | "error";
 
-export type MirrorState = { status: MirrorStatus; error: string | null; audio: boolean };
+export type MirrorState = {
+  status: MirrorStatus;
+  error: string | null;
+  audio: boolean;
+  lowFpsWarning: string | null;
+};
 
 export type MirrorResult =
   | { ok: true; stream: MediaStream; audio: boolean }
@@ -51,7 +56,12 @@ export function captureErrorMessage(err: unknown): string {
  */
 export function createMirror(): Mirror {
   const listeners = new Set<(state: MirrorState) => void>();
-  let state: MirrorState = { status: "idle", error: null, audio: false };
+  let state: MirrorState = {
+    status: "idle",
+    error: null,
+    audio: false,
+    lowFpsWarning: null,
+  };
   let generation = 0;
   let pc: RTCPeerConnection | null = null;
   let stream: MediaStream | null = null;
@@ -72,6 +82,21 @@ export function createMirror(): Mirror {
       })
     | null = null;
 
+  // Aviso dinâmico de FPS baixo na captura de janela (Windows).
+  // Só conta como "ativo" quando a janela está produzindo quadros (>= 8 fps), evitando
+  // falso positivo em janela estática ou minimizada.
+  const LOW_FPS_MIN_ACTIVE = 8; // abaixo disso, a janela está estática/minimizada
+  const LOW_FPS_MAX = 23; // <= 23 fps enquanto produz quadros = lento
+  const GOOD_FPS_MIN = 25; // >= 25 fps = recuperado
+  const LOW_FPS_SAMPLES_TO_TRIGGER = 5; // ~5 s de amostras de 1 s
+  const GOOD_FPS_SAMPLES_TO_CLEAR = 3; // 3 amostras seguidas boas
+
+  let previousFramesEncoded: number | null = null;
+  let previousTimestamp: number | null = null;
+  let lowFpsConsecutive = 0;
+  let goodFpsConsecutive = 0;
+  let lowFpsWarningEmitted = false;
+
   // The host starts capture before the viewer joins (SPEC user story), so the offer waits for a
   // viewer seat instead of being dropped by the signaling server.
   window.mirror.onState((next) => {
@@ -84,12 +109,53 @@ export function createMirror(): Mirror {
     for (const listener of listeners) listener(state);
   }
 
+  function clearLowFpsWarning(): void {
+    lowFpsWarningEmitted = false;
+    lowFpsConsecutive = 0;
+    goodFpsConsecutive = 0;
+    emit({ lowFpsWarning: null });
+  }
+
+  /**
+   * Avalia o FPS medido do sender de vídeo e dispara/limpa o aviso de captura de janela lenta.
+   * Dispara apenas quando a janela está ativamente produzindo quadros (>= 8 fps e <= 23 fps)
+   * por ~5 s consecutivas. Limpa quando o FPS sobe para >= 25 fps por 3 amostras seguidas.
+   */
+  function evaluateLowFpsWarning(fps: number): void {
+    if (lastSurfaceType !== "window") {
+      if (lowFpsWarningEmitted) clearLowFpsWarning();
+      return;
+    }
+    if (fps >= GOOD_FPS_MIN) {
+      goodFpsConsecutive += 1;
+      lowFpsConsecutive = 0;
+      if (lowFpsWarningEmitted && goodFpsConsecutive >= GOOD_FPS_SAMPLES_TO_CLEAR) {
+        clearLowFpsWarning();
+      }
+    } else if (fps >= LOW_FPS_MIN_ACTIVE && fps <= LOW_FPS_MAX) {
+      lowFpsConsecutive += 1;
+      goodFpsConsecutive = 0;
+      if (!lowFpsWarningEmitted && lowFpsConsecutive >= LOW_FPS_SAMPLES_TO_TRIGGER) {
+        lowFpsWarningEmitted = true;
+        emit({
+          lowFpsWarning:
+            "Window capture below 24 fps on Windows. Use Full Screen for stable 30 fps.",
+        });
+      }
+    } else {
+      // fps < LOW_FPS_MIN_ACTIVE: janela estática ou minimizada — não conta como ativo
+      lowFpsConsecutive = 0;
+      goodFpsConsecutive = 0;
+    }
+  }
+
   function release(): void {
     if (statsTimer !== null) {
       window.clearInterval(statsTimer);
       statsTimer = null;
     }
     lastSurfaceType = null;
+    clearLowFpsWarning();
     for (const track of stream?.getTracks() ?? []) track.stop();
     audioSender = null;
     audioTrack = null;
@@ -233,11 +299,28 @@ export function createMirror(): Mirror {
             const report = await videoSender.getStats();
             report.forEach((entry) => {
               if (entry.type === "outbound-rtp" && entry.kind === "video") {
-                lastEncoderStats = entry as RTCOutboundRtpStreamStats & {
+                const next = entry as RTCOutboundRtpStreamStats & {
                   qualityLimitationReason?: string;
                   framesEncoded?: number;
                   totalEncodeTime?: number;
                 };
+                lastEncoderStats = next;
+                const frames = next.framesEncoded ?? 0;
+                const ts =
+                  typeof next.timestamp === "number" ? next.timestamp : null;
+                if (
+                  previousFramesEncoded !== null &&
+                  previousTimestamp !== null &&
+                  ts !== null
+                ) {
+                  const deltaFrames = frames - previousFramesEncoded;
+                  const deltaSeconds = (ts - previousTimestamp) / 1000;
+                  if (deltaSeconds > 0) {
+                    evaluateLowFpsWarning(deltaFrames / deltaSeconds);
+                  }
+                }
+                previousFramesEncoded = frames;
+                previousTimestamp = ts;
               }
             });
           } catch {
@@ -340,6 +423,7 @@ export function createMirror(): Mirror {
         }
       }
       emit({ error: null });
+      if (quality === "720p") clearLowFpsWarning();
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
