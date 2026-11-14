@@ -52,6 +52,11 @@ async function securityServer(
 function assertSecure(res: Response, label: string): void {
   const csp = res.headers.get("content-security-policy") ?? "";
   for (const part of CSP_PARTS) assert.ok(csp.includes(part), `${label}: CSP missing ${part}`);
+  // CSP não deve conter cabeçalhos que não são diretivas CSP
+  assert.ok(!csp.includes("Permissions-Policy"), `${label}: CSP must not contain Permissions-Policy`);
+  assert.ok(!csp.includes("Cross-Origin-Resource-Policy"), `${label}: CSP must not contain Cross-Origin-Resource-Policy`);
+  assert.equal(res.headers.get("permissions-policy"), "camera=(), microphone=(), display-capture=(), geolocation=()", `${label}: permissions-policy`);
+  assert.equal(res.headers.get("cross-origin-resource-policy"), "same-origin", `${label}: cross-origin-resource-policy`);
   assert.equal(res.headers.get("x-content-type-options"), "nosniff", label);
   assert.equal(res.headers.get("referrer-policy"), "no-referrer", label);
   assert.equal(res.headers.get("cache-control"), "no-store", label);

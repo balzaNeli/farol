@@ -161,3 +161,68 @@ test("junk at the trust boundary is an invalid attempt, never an exception", () 
   }
   assert.equal(pairing.status().viewer, null);
 });
+
+test("per-IP: mesmo IP reinicia do zero após lockout global expirar (entradas limpas)", () => {
+  const { pairing, advance } = harness();
+  const ip = "10.0.0.1";
+  const wrong = wrongPinFor(pairing.status().pin);
+
+  // Três falhas: lockout global de 60 s (backstop)
+  pairing.verify(wrong, ip);
+  pairing.verify(wrong, ip);
+  const third = pairing.verify(wrong, ip);
+  assert.equal(third.kind, "locked");
+  assert.equal(third.retryAfterMs, 60_000);
+
+  // Lockout global expira após 60 s, entradas de IP são limpas
+  advance(60_000);
+  assert.equal(pairing.status().lockedUntilMs, 0);
+
+  // O IP volta a ter 3 tentativas globais (sem backoff por IP residual)
+  assert.deepEqual(pairing.verify(wrong, ip), { kind: "invalid_pin", attemptsLeft: 2 });
+  assert.deepEqual(pairing.verify(wrong, ip), { kind: "invalid_pin", attemptsLeft: 1 });
+  assert.deepEqual(pairing.verify(wrong, ip), { kind: "locked", retryAfterMs: 60_000 });
+});
+
+test("per-IP: lockout por IP é limpo quando lockout global se resolve", () => {
+  const { pairing, advance } = harness();
+  const ipA = "10.0.0.1";
+  const ipB = "10.0.0.2";
+  const wrong = wrongPinFor(pairing.status().pin);
+
+  // IP A falha 2 vezes (contador global: 2)
+  assert.deepEqual(pairing.verify(wrong, ipA), { kind: "invalid_pin", attemptsLeft: 2 });
+  assert.deepEqual(pairing.verify(wrong, ipA), { kind: "invalid_pin", attemptsLeft: 1 });
+
+  // IP B falha 1 vez (contador global: 3 → lockout global)
+  const b1 = pairing.verify(wrong, ipB);
+  assert.equal(b1.kind, "locked", "IP B dispara lockout global (contador compartilhado)");
+
+  // Lockout global expira; entradas de IP são limpas, ambos reiniciam do zero
+  advance(60_000);
+  assert.equal(pairing.status().lockedUntilMs, 0);
+  assert.deepEqual(pairing.verify(wrong, ipA), { kind: "invalid_pin", attemptsLeft: 2 });
+  assert.deepEqual(pairing.verify(wrong, ipB), { kind: "invalid_pin", attemptsLeft: 1 });
+});
+
+test("per-IP: após lockout global expirar, novo ciclo de 3 falhas dispara lockout novamente", () => {
+  const { pairing, advance } = harness();
+  const ip = "10.0.0.5";
+  const wrong = wrongPinFor(pairing.status().pin);
+
+  // Primeiro ciclo: 3 falhas → lockout global
+  pairing.verify(wrong, ip);
+  pairing.verify(wrong, ip);
+  pairing.verify(wrong, ip); // locked
+
+  // Lockout global expira; IP reinicia do zero
+  advance(60_000);
+  assert.equal(pairing.status().lockedUntilMs, 0);
+
+  // Segundo ciclo: 3 falhas → lockout global novamente
+  assert.deepEqual(pairing.verify(wrong, ip), { kind: "invalid_pin", attemptsLeft: 2 });
+  assert.deepEqual(pairing.verify(wrong, ip), { kind: "invalid_pin", attemptsLeft: 1 });
+  const third = pairing.verify(wrong, ip);
+  assert.equal(third.kind, "locked");
+  assert.equal(third.retryAfterMs, 60_000);
+});

@@ -74,6 +74,9 @@ export function createMirror(): Mirror {
   let answered = false;
   let statsTimer: number | null = null;
   let lastSurfaceType: "screen" | "window" | null = null;
+  // Qualidade de constraints da track aplicada com sucesso; usada para reverter se
+  // setParameters falhar após applyConstraints já ter mudado a captura.
+  let lastAppliedQuality: Quality = "1080p";
   let lastEncoderStats:
     | (RTCOutboundRtpStreamStats & {
         qualityLimitationReason?: string;
@@ -196,15 +199,18 @@ export function createMirror(): Mirror {
     maxBitrateBps: number,
     quality: Quality,
   ): Promise<void> {
-    if (quality === "native") return; // deixe a fonte em paz
     const params = sender.getParameters();
     if (!(params.encodings?.length)) {
       params.encodings = [{}];
     }
-    params.encodings[0] = {
-      ...params.encodings[0],
-      ...videoEncodingParams(maxBitrateBps),
-    };
+    const encoding = params.encodings[0]!;
+    if (quality === "native") {
+      // native não impõe teto: remove limites aplicados anteriormente (1080p/720p)
+      encoding.maxBitrate = undefined;
+      encoding.maxFramerate = undefined;
+    } else {
+      Object.assign(encoding, videoEncodingParams(maxBitrateBps));
+    }
     await sender.setParameters(params);
   }
 
@@ -253,6 +259,9 @@ export function createMirror(): Mirror {
         window.mirror.stop();
         return stopped();
       }
+      // Guarda a captura imediatamente: qualquer falha posterior (applyConstraints,
+      // peer, setParameters) chama release() e encerra todas as tracks já adquiridas.
+      stream = capture;
 
       const video = capture.getVideoTracks()[0];
       if (video === undefined) throw new Error("display capture returned no video track");
@@ -365,7 +374,6 @@ export function createMirror(): Mirror {
       };
 
       pc = peer;
-      stream = capture;
       videoTrack = video;
       audioTrack = audio;
 
@@ -375,7 +383,9 @@ export function createMirror(): Mirror {
         if (!sent) return { ok: false, error: state.error ?? "could not send the offer" };
       }
 
-      emit({ status: "waiting", error: null, audio: audio !== null });
+      lastAppliedQuality = request.quality;
+      // Preserva qualquer aviso não-crítico (ex.: bitrate cap) em vez de apagá-lo com error: null.
+      emit({ status: "waiting", error: state.error, audio: audio !== null });
       return { ok: true, stream: capture, audio: audio !== null };
     } catch (err) {
       if (run !== generation) return stopped();
@@ -408,6 +418,7 @@ export function createMirror(): Mirror {
   async function setQuality(quality: Quality): Promise<boolean> {
     if (videoTrack === null) return true;
     const constraints = videoConstraints(quality);
+    const previous = lastAppliedQuality;
     try {
       // Empty constraints clear the cap; the capture may keep its current size until it changes.
       await videoTrack.applyConstraints(constraints ?? {});
@@ -417,11 +428,15 @@ export function createMirror(): Mirror {
         try {
           await applyVideoBitrateCap(videoSender, TARGET_BITRATE_BPS, quality);
         } catch (err) {
+          // setParameters falhou após applyConstraints já ter mudado a track: reverta
+          // as constraints para a qualidade anterior para que UI e captura não divirjam.
+          await videoTrack.applyConstraints(videoConstraints(previous) ?? {}).catch(() => undefined);
           const message = err instanceof Error ? err.message : String(err);
           emit({ error: `Could not change quality to ${quality}: ${message}` });
           return false;
         }
       }
+      lastAppliedQuality = quality;
       emit({ error: null });
       if (quality === "720p") clearLowFpsWarning();
       return true;

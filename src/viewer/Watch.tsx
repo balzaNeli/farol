@@ -441,7 +441,7 @@ audio  ${stats.audio === null ? "n/a" : `${Math.round(stats.audio * 100)}%`}`}
             type="button"
             onClick={() => finishRef.current("Connection lost. Pair again.")}
           >
-            Reconnect
+            Pair again
           </button>
         </div>
       )}

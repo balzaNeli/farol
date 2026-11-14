@@ -182,7 +182,8 @@ espelhamento é onde ela quebra:
   diagnóstico ficam nas notas de solução de problemas.
 - O Windows Firewall pede permissão na primeira execução.
 - Um reinício de ICE falhado mostra uma tela de reconectar e retorna ao PIN pad; reemparelhar não
-  recarrega a página. Um teste físico de queda de Wi-Fi ainda está pendente.
+  recarrega a página. Queda de Wi-Fi → tela de reconectar → reemparelhar sem recarregar a página
+  (verificado na `AFTCA002`, veja `docs/manual-tests.md`).
 - No máximo um visualizador, uma tela por vez. Captura de microfone, transferência de arquivos,
   quadro branco, múltiplos visualizadores e travessia de internet são não-goals explícitos do v1.
 
