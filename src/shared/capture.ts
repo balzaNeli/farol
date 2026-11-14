@@ -29,3 +29,8 @@ export function videoEncodingParams(maxBitrateBps: number): VideoEncodingParams 
     scaleResolutionDownBy: 1.0,
   };
 }
+
+/** Detecta se a fonte capturada é uma janela específica (não a tela inteira). */
+export function isWindowSurface(displaySurface: string | null | undefined): boolean {
+  return displaySurface === "window";
+}
