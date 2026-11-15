@@ -33,3 +33,4 @@ coverage/
 *.swp
 *.swo
 .opencode/
+.agents/
