@@ -7,12 +7,6 @@ import { PairPanel } from "./PairPanel.tsx";
 const QUALITIES: Quality[] = ["native", "1080p", "720p"];
 const DEFAULT_PORT = "4680";
 
-const QUALITY_LABELS: Record<Quality, string> = {
-  native: "Native",
-  "1080p": "1080p (5 Mbps)",
-  "720p": "720p (max)",
-};
-
 function errorText(err: unknown): string {
   return err instanceof Error && err.message !== "" ? err.message : String(err);
 }
@@ -195,11 +189,9 @@ export function App() {
   return (
     <main className="host">
       <header className="host-header">
-        <div>
+        <div className="brand">
           <h1>Farol</h1>
-          <p className="muted">
-            Share this screen and system audio with the Fire TV or a browser on the same Wi-Fi.
-          </p>
+          <p>Share your screen and system audio over your local Wi-Fi.</p>
         </div>
         <span className={viewer === null ? "viewer-pill" : "viewer-pill is-live"}>
           <span className="dot" />
@@ -207,120 +199,126 @@ export function App() {
         </span>
       </header>
 
-      <PairPanel state={host} />
+      <div className="host-grid">
+        <PairPanel state={host} />
 
-      {host?.error !== null && host?.error !== undefined && (
-        <p className="message is-error" role="alert">
-          {host.error}
-        </p>
-      )}
-      {portFallback !== null && (
-        <p className="message is-notice">
-          Port {DEFAULT_PORT} was busy, so the viewer uses port {portFallback}. Use the address above.
-        </p>
-      )}
-
-      <section className="session" aria-label="Capture controls">
-        <div className="controls">
-          <label className="field grow">
-            <span>Source</span>
-            <select
-              value={sourceId}
+        <section className="session" aria-label="Capture controls">
+          <div className="source-row">
+            <label className="field grow">
+              <span>Source</span>
+              <select
+                value={sourceId}
+                disabled={active || sourcesLoading}
+                onChange={(event) => setSourceId(event.target.value)}
+              >
+                {sources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.kind === "screen" ? "Screen" : "Window"}: {source.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Refresh sources"
+              title="Refresh sources"
+              onClick={() => void loadSources()}
               disabled={active || sourcesLoading}
-              onChange={(event) => setSourceId(event.target.value)}
             >
-              {sources.map((source) => (
-                <option key={source.id} value={source.id}>
-                  {source.kind === "screen" ? "Screen" : "Window"}: {source.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M16.7 8A7 7 0 0 0 4.4 5.2L3 6.5M3 3.5v3h3M3.3 12A7 7 0 0 0 15.6 14.8l1.4-1.3m0 3v-3h-3" />
+              </svg>
+            </button>
+          </div>
 
-          <label className="field">
-            <span>Quality</span>
-            <select
-              value={quality}
-              disabled={state.status === "starting"}
-              onChange={(event) => void changeQuality(event.target.value as Quality)}
+          <div className="config-row">
+            <fieldset className="quality-field" disabled={state.status === "starting"}>
+              <legend>Quality</legend>
+              <div className="quality-options" role="group" aria-label="Quality">
+                {QUALITIES.map((entry) => (
+                  <button
+                    key={entry}
+                    type="button"
+                    className={quality === entry ? "quality-chip is-selected" : "quality-chip"}
+                    aria-pressed={quality === entry}
+                    onClick={() => void changeQuality(entry)}
+                  >
+                    {entry === "native" ? "Native" : entry}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <label className="audio-toggle">
+              <span>System audio</span>
+              <input
+                type="checkbox"
+                checked={audioChecked}
+                disabled={audioSupported !== true || state.status === "starting"}
+                onChange={(event) => void toggleAudio(event.target.checked)}
+              />
+              <span className="switch" aria-hidden="true" />
+            </label>
+          </div>
+
+          <div className="actions">
+            <button
+              type="button"
+              className={active ? "primary is-active" : "primary"}
+              onClick={() => (active ? stop() : void start())}
+              disabled={!active && (sourcesLoading || sourceId === "")}
             >
-              {QUALITIES.map((entry) => (
-                <option key={entry} value={entry}>
-                  {QUALITY_LABELS[entry]}
-                </option>
-              ))}
-            </select>
-          </label>
+              {active ? "Stop Mirroring" : "Start Mirroring"}
+            </button>
+          </div>
 
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={audioChecked}
-              disabled={audioSupported !== true || state.status === "starting"}
-              onChange={(event) => void toggleAudio(event.target.checked)}
-            />
-            <span>System audio</span>
-          </label>
-        </div>
+          <div className="status-area" aria-label="Transmission status">
+            <p className={state.status === "error" ? "status is-error" : "status"} role="status">
+              {statusText}
+            </p>
+            {host?.error !== null && host?.error !== undefined && (
+              <p className="message is-error" role="alert">{host.error}</p>
+            )}
+            {state.error !== null && state.status !== "error" && (
+              <p className="message is-error" role="alert">{state.error}</p>
+            )}
+            {portFallback !== null && (
+              <p className="message is-notice" role="status">
+                Port {DEFAULT_PORT} was busy, so the viewer uses port {portFallback}. Use the address in the pairing card.
+              </p>
+            )}
+            {sourcesLoading && <p className="muted">Loading capture sources...</p>}
+            {sourceError !== null && <p className="message is-error" role="alert">{sourceError}</p>}
+            {notice !== null && <p className="message is-notice" role="status">{notice}</p>}
+            {windowModeNotice !== null && <p className="message is-notice" role="status">{windowModeNotice}</p>}
+            {state.lowFpsWarning !== null && <p className="message is-notice" role="status">{state.lowFpsWarning}</p>}
+            {audioSupported === null && <p className="muted">Checking system audio support...</p>}
+            {audioSupported === false && <p className="muted">System audio is unavailable on this OS. Video only.</p>}
+            {audioSupported === true && audioChecked && (
+              <p className="muted">The viewer hears all system audio, not one app.</p>
+            )}
+          </div>
 
-        <div className="actions">
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void start()}
-            disabled={active || sourcesLoading || sourceId === ""}
-          >
-            Start
-          </button>
-          <button type="button" onClick={stop} disabled={!active}>
-            Stop
-          </button>
-          <button
-            type="button"
-            onClick={() => void loadSources()}
-            disabled={active || sourcesLoading}
-          >
-            Refresh sources
-          </button>
-        </div>
-
-        <p className={state.status === "error" ? "status is-error" : "status"} role="status">
-          {statusText}
-        </p>
-        {state.error !== null && state.status !== "error" && (
-          <p className="message is-error" role="alert">
-            {state.error}
-          </p>
-        )}
-        {sourcesLoading && <p className="muted">Loading capture sources...</p>}
-        {sourceError !== null && (
-          <p className="message is-error" role="alert">
-            {sourceError}
-          </p>
-        )}
-        {notice !== null && (
-          <p className="message is-notice" role="status">
-            {notice}
-          </p>
-        )}
-        {windowModeNotice !== null && (
-          <p className="message is-notice" role="status">
-            {windowModeNotice}
-          </p>
-        )}
-        {state.lowFpsWarning !== null && (
-          <p className="message is-notice" role="status">{state.lowFpsWarning}</p>
-        )}
-        {audioSupported === null && <p className="muted">Checking system audio support...</p>}
-        {audioSupported === false && (
-          <p className="muted">System audio is unavailable on this OS. Video only.</p>
-        )}
-        {audioSupported === true && audioChecked && (
-          <p className="muted">The viewer hears all system audio, not one app.</p>
-        )}
-
-        <video ref={videoRef} className="preview" hidden={!active} autoPlay playsInline muted />
-      </section>
+          <video
+            ref={videoRef}
+            className="preview"
+            hidden={state.status !== "live"}
+            autoPlay
+            playsInline
+            muted
+          />
+          {state.status !== "live" && (
+            <div className="preview-placeholder" aria-live="polite">
+              <svg viewBox="0 0 48 48" aria-hidden="true">
+                <rect x="5" y="8" width="38" height="27" rx="3" />
+                <path d="M17 41h14M24 35v6" />
+              </svg>
+              <span>Preview will appear when mirroring starts.</span>
+            </div>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

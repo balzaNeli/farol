@@ -1,7 +1,16 @@
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "docs/**", "deskreen/**", ".opencode/**"] },
+  {
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "docs/**",
+      "deskreen/**",
+      ".opencode/**",
+      ".agents/**",
+    ],
+  },
   ...tseslint.configs.recommended,
   {
     rules: {
