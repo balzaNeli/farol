@@ -75,6 +75,9 @@ export function createMirror(): Mirror {
     lowFpsWarning: null,
   };
   let generation = 0;
+  // Contador de operações assíncronas em andamento (setAudio/setQuality). Após cada await,
+  // verificamos se a operação ainda é a mais recente; chamadas mais antigas são descartadas.
+  let pendingOperation = 0;
   let pc: RTCPeerConnection | null = null;
   let stream: MediaStream | null = null;
   let videoTrack: MediaStreamTrack | null = null;
@@ -181,6 +184,13 @@ export function createMirror(): Mirror {
     offered = false;
     offering = false;
     answered = false;
+    // Zera estado do encoder e contadores de FPS: uma sessão seguinte não deve herdar
+    // medições da sessão anterior.
+    lastEncoderStats = null;
+    previousFramesEncoded = null;
+    previousTimestamp = null;
+    lowFpsConsecutive = 0;
+    goodFpsConsecutive = 0;
   }
 
   function fail(message: string): void {
@@ -426,11 +436,14 @@ export function createMirror(): Mirror {
   async function setAudio(on: boolean): Promise<boolean> {
     if (on && (audioSender === null || audioTrack === null)) return false;
     // Main answers with the resulting audio state: false for "off" is success, not refusal.
+    const operation = ++pendingOperation;
     const available = await window.mirror.setAudio(on);
+    if (operation !== pendingOperation) return false;
     if (on && !available) return false;
     if (audioSender === null || audioTrack === null) return true;
 
     await audioSender.replaceTrack(on ? audioTrack : null);
+    if (operation !== pendingOperation) return false;
     audioTrack.enabled = on;
     emit({ audio: on });
     return true;
@@ -440,9 +453,11 @@ export function createMirror(): Mirror {
     if (videoTrack === null) return true;
     const constraints = videoConstraints(quality);
     const previous = lastAppliedQuality;
+    const operation = ++pendingOperation;
     try {
       // Empty constraints clear the cap; the capture may keep its current size until it changes.
       await videoTrack.applyConstraints(constraints ?? {});
+      if (operation !== pendingOperation) return false;
       // Reaplica o teto de bitrate fixo ao trocar a qualidade (o bitrate permanece 5 Mbps).
       const videoSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
       if (videoSender !== undefined) {
@@ -457,6 +472,7 @@ export function createMirror(): Mirror {
           return false;
         }
       }
+      if (operation !== pendingOperation) return false;
       lastAppliedQuality = quality;
       emit({ error: null });
       if (quality === "720p") clearLowFpsWarning();

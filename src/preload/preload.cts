@@ -15,13 +15,17 @@ const api: MirrorApi = {
     ipcRenderer.send("mirror:stop");
   },
   onSignal: (callback: (signal: Signal) => void) => {
-    ipcRenderer.on("mirror:signal", (_event, signal: Signal) => callback(signal));
+    const handler = (_event: unknown, signal: Signal) => callback(signal);
+    ipcRenderer.on("mirror:signal", handler);
+    return () => ipcRenderer.removeListener("mirror:signal", handler);
   },
   sendSignal: (signal: Signal) => {
     ipcRenderer.send("mirror:sendSignal", signal);
   },
   onState: (callback: (state: HostState) => void) => {
-    ipcRenderer.on("mirror:state", (_event, state: HostState) => callback(state));
+    const handler = (_event: unknown, state: HostState) => callback(state);
+    ipcRenderer.on("mirror:state", handler);
+    return () => ipcRenderer.removeListener("mirror:state", handler);
   },
 };
 
