@@ -9,12 +9,12 @@ import { WebSocket } from "ws";
 import type { HostState } from "../shared/ipc.ts";
 import { parseSignal, type Signal } from "../shared/protocol.ts";
 import { startServer, type RunningServer } from "../server/http.ts";
-import { lanAddresses } from "../server/lan.ts";
+import { lanAddresses, preferredLanAddress } from "../server/lan.ts";
 import { createPairing, type Pairing } from "../server/pairing.ts";
 import type { ViewerInfo } from "../server/ws.ts";
 import { createCaptureTarget, installDisplayMediaHandler } from "./display-media.ts";
 import { registerIpc } from "./ipc.ts";
-import { pairUrl, primaryUrl } from "./qr.ts";
+import { pairUrl } from "./qr.ts";
 
 // Must be set before app.whenReady: mDNS ICE candidates are the classic LAN-WebRTC failure.
 app.commandLine.appendSwitch("disable-features", "WebRtcHideLocalIpsWithMdns");
@@ -65,7 +65,9 @@ function hostState(): HostState {
   const urls =
     port === undefined ? [] : lanAddresses().map((address) => `http://${address}:${port}/`);
   const pin = status?.pin ?? "";
-  refreshQr(primaryUrl(urls), pin);
+  const primaryAddress = port === undefined ? null : preferredLanAddress();
+  const primary = primaryAddress === null ? null : `http://${primaryAddress}:${port}/`;
+  refreshQr(primary, pin);
   const noLan =
     port !== undefined && urls.length === 0
       ? "No LAN address found. Connect this computer to Wi-Fi or Ethernet."
