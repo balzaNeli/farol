@@ -122,7 +122,8 @@ test("/api/info reports status and never a secret", async (t) => {
     assert.equal(typeof body.version, "string");
     assert.equal(body.pairingOpen, true);
     assert.equal(body.lockedUntilMs, 0);
-    assert.deepEqual(Object.keys(body).sort(), ["lockedUntilMs", "name", "pairingOpen", "version"]);
+    assert.equal(body.retryAfterMs, 0);
+    assert.deepEqual(Object.keys(body).sort(), ["lockedUntilMs", "name", "pairingOpen", "retryAfterMs", "version"]);
   });
 });
 
@@ -222,6 +223,11 @@ test("POST /api/pair: wrong PIN, three strikes, lockout, and the PIN is never ec
   const locked = JSON.parse(await collect(third)) as { error: string; retryAfterMs: number };
   assert.equal(locked.error, "locked");
   assert.ok(locked.retryAfterMs > 0);
+
+  // /api/info expõe o tempo restante de lockout
+  const infoDuringLock = await (await fetch(`${base}/api/info`)).json() as Record<string, unknown>;
+  assert.ok((infoDuringLock.retryAfterMs as number) > 0, "retryAfterMs deve ser > 0 durante lockout");
+  assert.ok((infoDuringLock.lockedUntilMs as number) > 0, "lockedUntilMs deve ser > 0 durante lockout");
 
   // The right PIN does not open a locked door either, and the refusal costs no attempt.
   assert.equal((await pair(pin)).status, 429);

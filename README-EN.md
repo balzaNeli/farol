@@ -178,7 +178,8 @@ where it breaks:
   live in the troubleshooting notes.
 - Windows Firewall asks for permission on first run.
 - A failed ICE restart shows a reconnect screen and returns to the PIN pad; re-pairing does not
-  reload the page. A physical Wi-Fi-drop test is still pending.
+  reload the page. Wi-Fi drop → reconnect screen → re-pair without page reload (verified on
+  `AFTCA002`, see `docs/manual-tests.md`).
 - Maximum one viewer, one screen at a time. Microphone capture, file transfer, whiteboard,
   multi-viewer and internet traversal are explicit non-goals for v1.
 

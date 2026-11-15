@@ -6,6 +6,7 @@
   },
   "files": [
     "dist/**/*",
+    "docs/**/*",
     "package.json"
   ],
   "win": {

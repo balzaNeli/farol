@@ -10,6 +10,12 @@ import {
 } from "./connection.ts";
 
 const RECONNECT_TIMEOUT_MS = 8000;
+// Tempo máximo para a primeira oferta do host ou a primeira mídia negociada. Impede que o
+// espectador fique indefinidamente em "Waiting for the host..." quando a negociação não avança.
+const FIRST_MEDIA_TIMEOUT_MS = 10_000;
+// Limite de candidatos ICE pendentes antes da oferta remota. Impede que um peer com token
+// válido encha a memória da TV com ICE antes da primeira oferta.
+const MAX_PENDING_ICE = 50;
 
 type WatchProps = { token: string; debug: boolean; onEnded: (message: string) => void };
 
@@ -120,9 +126,14 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     let remoteReady = false;
     let statsTimer: number | null = null;
     let reconnectTimer: number | null = null;
+    let firstMediaTimer: number | null = null;
     let iceFailureHandled = false;
     let previousVideo: { bytes: number; timestamp: number } | null = null;
     const pendingIce: RTCIceCandidateInit[] = [];
+    // Serializa ofertas concorrentes: cada oferta espera a anterior terminar antes de
+    // chamar setRemoteDescription / setLocalDescription. Isso evita interleaving quando
+    // o host envia um reinício ICE seguido de outra oferta.
+    let offerChain: Promise<void> = Promise.resolve();
     const video = videoRef.current;
     const peer = new RTCPeerConnection(RTC_CONFIG);
     const url = new URL("/ws", window.location.href);
@@ -204,20 +215,32 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     }
 
     async function acceptOffer(sdp: string): Promise<void> {
-      try {
-        await peer.setRemoteDescription({ type: "offer", sdp });
-        remoteReady = true;
-        for (const candidate of pendingIce.splice(0)) {
-          await peer.addIceCandidate(candidate).catch(() => undefined);
+      // Cada oferta entra na fila serial; se uma oferta mais nova já começou, esta é descartada.
+      const previous = offerChain;
+      offerChain = (async () => {
+        await previous;
+        if (finished || disposed) return;
+        try {
+          await peer.setRemoteDescription({ type: "offer", sdp });
+          if (finished || disposed) return;
+          remoteReady = true;
+          for (const candidate of pendingIce.splice(0)) {
+            await peer.addIceCandidate(candidate).catch(() => undefined);
+          }
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          if (peer.localDescription !== null && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "answer", sdp: peer.localDescription.sdp }));
+            if (firstMediaTimer !== null) {
+              window.clearTimeout(firstMediaTimer);
+              firstMediaTimer = null;
+            }
+          }
+        } catch {
+          if (!finished && !disposed) finish("Could not start playback. Pair again.");
         }
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        if (peer.localDescription !== null && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: "answer", sdp: peer.localDescription.sdp }));
-        }
-      } catch {
-        finish("Could not start playback. Pair again.");
-      }
+      })();
+      await offerChain;
     }
 
     peer.ontrack = (event) => {
@@ -225,6 +248,10 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
       const [stream] = event.streams;
       if (stream === undefined) return;
       if (video.srcObject !== stream) video.srcObject = stream;
+      if (firstMediaTimer !== null) {
+        window.clearTimeout(firstMediaTimer);
+        firstMediaTimer = null;
+      }
       setHasStream(true);
       setStatus("Connected");
       void video.play().catch(() => setStatus("Press Sound to play."));
@@ -264,7 +291,15 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
       }
     };
 
-    socket.onopen = () => setStatus("Waiting for the host...");
+    socket.onopen = () => {
+      setStatus("Waiting for the host...");
+      // Timeout de primeira oferta/primeira mídia: se o host não negociar a tempo, encerra e
+      // deixa o usuário voltar ao PIN pad.
+      firstMediaTimer = window.setTimeout(() => {
+        firstMediaTimer = null;
+        finish("No media from the host. Pair again.");
+      }, FIRST_MEDIA_TIMEOUT_MS);
+    };
     socket.onerror = () => finish("Connection lost. Pair again.");
     socket.onclose = () => {
       if (!disposed && !finished) finish("Connection lost. Pair again.");
@@ -277,7 +312,13 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
         void acceptOffer(signal.sdp);
       } else if (signal.type === "ice") {
         if (remoteReady) void peer.addIceCandidate(signal.candidate).catch(() => undefined);
-        else pendingIce.push(signal.candidate);
+        else {
+          if (pendingIce.length >= MAX_PENDING_ICE) {
+            finish("Too many ICE candidates before the offer. Pair again.");
+            return;
+          }
+          pendingIce.push(signal.candidate);
+        }
       } else if (signal.type === "stop") {
         finish("The host stopped sharing.");
       }
@@ -441,7 +482,7 @@ audio  ${stats.audio === null ? "n/a" : `${Math.round(stats.audio * 100)}%`}`}
             type="button"
             onClick={() => finishRef.current("Connection lost. Pair again.")}
           >
-            Reconnect
+            Pair again
           </button>
         </div>
       )}

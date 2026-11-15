@@ -25,9 +25,9 @@ export type MirrorApi = {
   start: (req: StartRequest) => Promise<{ audio: boolean }>;
   setAudio: (on: boolean) => Promise<boolean>;
   stop: () => void;
-  onSignal: (cb: (signal: Signal) => void) => void;
+  onSignal: (cb: (signal: Signal) => void) => () => void;
   sendSignal: (signal: Signal) => void;
-  onState: (cb: (state: HostState) => void) => void;
+  onState: (cb: (state: HostState) => void) => () => void;
 };
 
 const QUALITIES: ReadonlySet<Quality> = new Set(["native", "1080p", "720p"]);

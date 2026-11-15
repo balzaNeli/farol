@@ -23,8 +23,8 @@ const isVirtualLike = (name: string): boolean => {
 // score: higher = preferred for the QR/primary URL
 const rankScore = (name: string): number => {
   if (isWiFiLike(name)) return 100;
-  if (isEthernetLike(name)) return 80;
   if (isVirtualLike(name)) return -200;
+  if (isEthernetLike(name)) return 80;
   return 0;
 };
 
@@ -35,10 +35,10 @@ const rankScore = (name: string): number => {
  */
 export function rankedLanAddresses(interfaces: InterfaceMap = networkInterfaces()): { address: string; score: number; reason: string }[] {
   const found = new Map<string, { score: number; reason: string }>();
-  for (const entries of Object.values(interfaces ?? [])) {
+  for (const [name, entries] of Object.entries(interfaces ?? [])) {
     for (const entry of entries ?? []) {
       if (entry.family !== "IPv4" || entry.internal || entry.address.startsWith("169.254.")) continue;
-      const score = rankScore(entry.address);
+      const score = rankScore(name);
       if (!found.has(entry.address) || score > found.get(entry.address)!.score) {
         const reason: string =
           score >= 100 ? "Wi‑Fi" : score >= 80 ? "Ethernet" : score >= 0 ? "outra física" : "virtual";
@@ -58,8 +58,10 @@ export function rankedLanAddresses(interfaces: InterfaceMap = networkInterfaces(
 export function preferredLanAddress(interfaces: InterfaceMap = networkInterfaces()): string | null {
   const ranked: Array<{ address: string; score: number; reason: string }> = rankedLanAddresses(interfaces) ?? [];
   if (ranked.length === 0) return null;
-  // ranked.length > 0 guarantees ranked[0] exists
-  return (ranked[0] as { address: string }).address;
+  const best = ranked[0];
+  // Apenas interfaces físicas (score >= 0) são candidatas ao QR/primary URL.
+  if (best === undefined || best.score < 0) return null;
+  return best.address;
 }
 
 /**

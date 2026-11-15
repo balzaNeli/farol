@@ -2,7 +2,6 @@ import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 /** Maps client IP → { failures, firstAt } for exponential backoff. */
 type IpFailure = { failures: number; firstAt: number };
-const ipFailures = new Map<string, IpFailure>();
 
 /**
  * Pairing store. Pure and injectable (clock only), so tests need no timers and the host UI can
@@ -29,6 +28,8 @@ export type PairingStatus = {
   pin: string;
   expiresAtMs: number;
   lockedUntilMs: number;
+  /** Tempo restante de lockout em ms, ou 0 quando não há lockout ativo. */
+  retryAfterMs: number;
   viewer: ViewerSession | null;
 };
 
@@ -69,6 +70,7 @@ export function createPairing(options: PairingOptions = {}): Pairing {
   let lockedUntilMs = 0;
   let failures = 0;
   let session: (ViewerSession & { token: string; connectByMs: number }) | null = null;
+  const ipFailures = new Map<string, IpFailure>();
 
   function newPin(): string {
     return String(randomInt(0, PIN_SPACE)).padStart(6, "0");
@@ -86,12 +88,8 @@ export function createPairing(options: PairingOptions = {}): Pairing {
     if (lockedUntilMs !== 0 && at >= lockedUntilMs) {
       lockedUntilMs = 0;
       failures = 0;
-      // Clear per-IP entries that have been expired long enough
-      for (const [ip, entry] of ipFailures) {
-        if (at - entry.firstAt >= lockoutMs) {
-          ipFailures.delete(ip);
-        }
-      }
+      // Limpa entradas de IP quando o lockout global se resolve (per SPEC)
+      ipFailures.clear();
     }
     // Clean any session that past its connect deadline without connecting
     if (session !== null && !session.connected && at >= session.connectByMs) session = null;
@@ -105,6 +103,7 @@ export function createPairing(options: PairingOptions = {}): Pairing {
       pin,
       expiresAtMs,
       lockedUntilMs,
+      retryAfterMs: lockedUntilMs !== 0 ? Math.max(0, lockedUntilMs - at) : 0,
       viewer: session === null ? null : { id: session.id, connected: session.connected },
     };
   }
@@ -113,38 +112,35 @@ export function createPairing(options: PairingOptions = {}): Pairing {
     ipFailures.delete(ip);
   }
 
-  function recordIpFailure(ip: string): { kind: "locked"; retryAfterMs: number } | null {
+  function recordIpFailure(ip: string): void {
     const entry = ipFailures.get(ip) ?? { failures: 0, firstAt: now() };
     entry.failures += 1;
     if (entry.firstAt === 0) entry.firstAt = now();
-    // Exponential backoff: lockoutMs, lockoutMs*2, lockoutMs*4, ... capped at 5*lockoutMs
-    const backoff = Math.min(lockoutMs * 2 ** entry.failures, lockoutMs * 5);
-    const retryAfter = backoff;
-    if (entry.failures >= maxFailures) {
-      lockedUntilMs = now() + retryAfter;
-      return { kind: "locked", retryAfterMs: retryAfter };
-    }
-    return null;
+    ipFailures.set(ip, entry);
   }
 
   function verify(input: unknown, clientIp?: string): PairingResult {
     const at = sweep();
 
-    // 1) Check per-IP lockout first (independent of global state)
+    // 1) Check per-IP lockout first (independent of global state).
+    // O backoff exponencial começa em lockoutMs e dobra a cada novo lockout do mesmo IP.
     if (clientIp !== undefined) {
       const ipEntry = ipFailures.get(clientIp);
-      if (ipEntry && lockedUntilMs !== 0) {
-        // Global lockout also active; return the global remaining time
-        return { kind: "locked", retryAfterMs: lockedUntilMs - at };
-      }
       if (ipEntry && ipEntry.failures >= maxFailures) {
-        // Per-IP lockout active (should not happen if global already checked,
-        // but keep for completeness; the entry was already counted past max)
-        // Re-compute based on global state instead
+        const backoff = Math.min(
+          lockoutMs * 2 ** (ipEntry.failures - maxFailures + 1),
+          lockoutMs * 5,
+        );
+        const lockoutUntil = ipEntry.firstAt + backoff;
+        if (at < lockoutUntil) {
+          return { kind: "locked", retryAfterMs: lockoutUntil - at };
+        }
+        // Lockout por IP expirou: limpa a entrada para o próximo ciclo
+        ipFailures.delete(clientIp);
       }
     }
 
-    // 2) Global lockout check
+    // 2) Global lockout check (backstop de 3 tentativas → 60 s).
     if (lockedUntilMs !== 0) return { kind: "locked", retryAfterMs: lockedUntilMs - at };
 
     if (session !== null) return { kind: "busy" };
@@ -167,10 +163,9 @@ export function createPairing(options: PairingOptions = {}): Pairing {
       rotate(at); // this code has done its job; the next viewer gets a fresh one
       return { kind: "paired", token: created.token, sessionId: created.id };
     }
-    // Record failure per IP
+    // Record failure per IP (apenas rastreia; o lockout é tratado acima e pelo global)
     if (clientIp !== undefined) {
-      const ipResult = recordIpFailure(clientIp);
-      if (ipResult) return ipResult;
+      recordIpFailure(clientIp);
     }
     failures += 1;
     if (failures >= maxFailures) {

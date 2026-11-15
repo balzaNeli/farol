@@ -6,11 +6,28 @@ import { RTC_CONFIG } from "../shared/rtc.ts";
 
 export type MirrorStatus = "idle" | "starting" | "waiting" | "live" | "reconnecting" | "error";
 
-export type MirrorState = { status: MirrorStatus; error: string | null; audio: boolean };
+export type MirrorState = {
+  status: MirrorStatus;
+  error: string | null;
+  audio: boolean;
+  lowFpsWarning: string | null;
+};
 
 export type MirrorResult =
   | { ok: true; stream: MediaStream; audio: boolean }
   | { ok: false; error: string };
+
+/** RTCRtpSendParameters com campos que o Chromium lê no nível de cima de params. */
+type RtcSenderParams = RTCRtpSendParameters & {
+  degradationPreference?: "maintain-resolution" | "maintain-framerate" | "balanced";
+  scaleResolutionDownBy?: number;
+};
+
+/** RTCRtpEncodingParameters com campos que o Chromium ignora dentro de encodings[0]. */
+type RtcEncodingParams = RTCRtpEncodingParameters & {
+  degradationPreference?: "maintain-resolution" | "maintain-framerate" | "balanced";
+  scaleResolutionDownBy?: number;
+};
 
 export type Mirror = {
   start: (request: StartRequest) => Promise<MirrorResult>;
@@ -51,8 +68,16 @@ export function captureErrorMessage(err: unknown): string {
  */
 export function createMirror(): Mirror {
   const listeners = new Set<(state: MirrorState) => void>();
-  let state: MirrorState = { status: "idle", error: null, audio: false };
+  let state: MirrorState = {
+    status: "idle",
+    error: null,
+    audio: false,
+    lowFpsWarning: null,
+  };
   let generation = 0;
+  // Contador de operações assíncronas em andamento (setAudio/setQuality). Após cada await,
+  // verificamos se a operação ainda é a mais recente; chamadas mais antigas são descartadas.
+  let pendingOperation = 0;
   let pc: RTCPeerConnection | null = null;
   let stream: MediaStream | null = null;
   let videoTrack: MediaStreamTrack | null = null;
@@ -64,6 +89,9 @@ export function createMirror(): Mirror {
   let answered = false;
   let statsTimer: number | null = null;
   let lastSurfaceType: "screen" | "window" | null = null;
+  // Qualidade de constraints da track aplicada com sucesso; usada para reverter se
+  // setParameters falhar após applyConstraints já ter mudado a captura.
+  let lastAppliedQuality: Quality = "1080p";
   let lastEncoderStats:
     | (RTCOutboundRtpStreamStats & {
         qualityLimitationReason?: string;
@@ -71,6 +99,21 @@ export function createMirror(): Mirror {
         totalEncodeTime?: number;
       })
     | null = null;
+
+  // Aviso dinâmico de FPS baixo na captura de janela (Windows).
+  // Só conta como "ativo" quando a janela está produzindo quadros (>= 8 fps), evitando
+  // falso positivo em janela estática ou minimizada.
+  const LOW_FPS_MIN_ACTIVE = 8; // abaixo disso, a janela está estática/minimizada
+  const LOW_FPS_MAX = 23; // <= 23 fps enquanto produz quadros = lento
+  const GOOD_FPS_MIN = 25; // >= 25 fps = recuperado
+  const LOW_FPS_SAMPLES_TO_TRIGGER = 5; // ~5 s de amostras de 1 s
+  const GOOD_FPS_SAMPLES_TO_CLEAR = 3; // 3 amostras seguidas boas
+
+  let previousFramesEncoded: number | null = null;
+  let previousTimestamp: number | null = null;
+  let lowFpsConsecutive = 0;
+  let goodFpsConsecutive = 0;
+  let lowFpsWarningEmitted = false;
 
   // The host starts capture before the viewer joins (SPEC user story), so the offer waits for a
   // viewer seat instead of being dropped by the signaling server.
@@ -84,12 +127,53 @@ export function createMirror(): Mirror {
     for (const listener of listeners) listener(state);
   }
 
+  function clearLowFpsWarning(): void {
+    lowFpsWarningEmitted = false;
+    lowFpsConsecutive = 0;
+    goodFpsConsecutive = 0;
+    emit({ lowFpsWarning: null });
+  }
+
+  /**
+   * Avalia o FPS medido do sender de vídeo e dispara/limpa o aviso de captura de janela lenta.
+   * Dispara apenas quando a janela está ativamente produzindo quadros (>= 8 fps e <= 23 fps)
+   * por ~5 s consecutivas. Limpa quando o FPS sobe para >= 25 fps por 3 amostras seguidas.
+   */
+  function evaluateLowFpsWarning(fps: number): void {
+    if (lastSurfaceType !== "window") {
+      if (lowFpsWarningEmitted) clearLowFpsWarning();
+      return;
+    }
+    if (fps >= GOOD_FPS_MIN) {
+      goodFpsConsecutive += 1;
+      lowFpsConsecutive = 0;
+      if (lowFpsWarningEmitted && goodFpsConsecutive >= GOOD_FPS_SAMPLES_TO_CLEAR) {
+        clearLowFpsWarning();
+      }
+    } else if (fps >= LOW_FPS_MIN_ACTIVE && fps <= LOW_FPS_MAX) {
+      lowFpsConsecutive += 1;
+      goodFpsConsecutive = 0;
+      if (!lowFpsWarningEmitted && lowFpsConsecutive >= LOW_FPS_SAMPLES_TO_TRIGGER) {
+        lowFpsWarningEmitted = true;
+        emit({
+          lowFpsWarning:
+            "Window capture below 24 fps on Windows. Use Full Screen for stable 30 fps.",
+        });
+      }
+    } else {
+      // fps < LOW_FPS_MIN_ACTIVE: janela estática ou minimizada — não conta como ativo
+      lowFpsConsecutive = 0;
+      goodFpsConsecutive = 0;
+    }
+  }
+
   function release(): void {
     if (statsTimer !== null) {
       window.clearInterval(statsTimer);
       statsTimer = null;
     }
     lastSurfaceType = null;
+    clearLowFpsWarning();
     for (const track of stream?.getTracks() ?? []) track.stop();
     audioSender = null;
     audioTrack = null;
@@ -100,6 +184,13 @@ export function createMirror(): Mirror {
     offered = false;
     offering = false;
     answered = false;
+    // Zera estado do encoder e contadores de FPS: uma sessão seguinte não deve herdar
+    // medições da sessão anterior.
+    lastEncoderStats = null;
+    previousFramesEncoded = null;
+    previousTimestamp = null;
+    lowFpsConsecutive = 0;
+    goodFpsConsecutive = 0;
   }
 
   function fail(message: string): void {
@@ -130,15 +221,26 @@ export function createMirror(): Mirror {
     maxBitrateBps: number,
     quality: Quality,
   ): Promise<void> {
-    if (quality === "native") return; // deixe a fonte em paz
-    const params = sender.getParameters();
+    const params = sender.getParameters() as RtcSenderParams;
     if (!(params.encodings?.length)) {
       params.encodings = [{}];
     }
-    params.encodings[0] = {
-      ...params.encodings[0],
-      ...videoEncodingParams(maxBitrateBps),
-    };
+    const encoding = params.encodings[0]! as RtcEncodingParams;
+    if (quality === "native") {
+      // native não impõe teto: remove limites aplicados anteriormente (1080p/720p)
+      encoding.maxBitrate = undefined;
+      encoding.maxFramerate = undefined;
+    } else {
+      Object.assign(encoding, videoEncodingParams(maxBitrateBps));
+      // degradationPreference e scaleResolutionDownBy pertencem ao nível de cima
+      // de params (o Chromium os ignora dentro de encodings[0]); removem de encodings[0].
+      delete encoding.degradationPreference;
+      delete encoding.scaleResolutionDownBy;
+    }
+    // degradationPreference e scaleResolutionDownBy ficam no nível de cima de params;
+    // o Chromium ignora o campo dentro de encodings[0].
+    params.degradationPreference = "maintain-resolution";
+    params.scaleResolutionDownBy = 1.0;
     await sender.setParameters(params);
   }
 
@@ -187,12 +289,16 @@ export function createMirror(): Mirror {
         window.mirror.stop();
         return stopped();
       }
+      // Guarda a captura imediatamente: qualquer falha posterior (applyConstraints,
+      // peer, setParameters) chama release() e encerra todas as tracks já adquiridas.
+      stream = capture;
 
       const video = capture.getVideoTracks()[0];
       if (video === undefined) throw new Error("display capture returned no video track");
-      // "motion" instrui o Chromium a derrubar qualidade visual, não quadros, quando o encoder
-      // estiver pressionado. Complementa o teto de bitrate fixo (5 Mbps) sem reduzir a resolução.
-      video.contentHint = "motion";
+      // "detail" instrui o Chromium a manter qualidade visual, não derrubar
+      // resolução nem fps, quando o encoder estiver pressionado. Complementa o
+      // teto de bitrate fixo (5 Mbps) sem reduzir a resolução (opção b).
+      video.contentHint = "detail";
 
       // Detecta se a fonte capturada é uma janela específica (não a tela inteira) para o aviso
       // de ~17 fps no Windows (Wayland/HWND path do Chromium limita janelas específicas).
@@ -233,11 +339,28 @@ export function createMirror(): Mirror {
             const report = await videoSender.getStats();
             report.forEach((entry) => {
               if (entry.type === "outbound-rtp" && entry.kind === "video") {
-                lastEncoderStats = entry as RTCOutboundRtpStreamStats & {
+                const next = entry as RTCOutboundRtpStreamStats & {
                   qualityLimitationReason?: string;
                   framesEncoded?: number;
                   totalEncodeTime?: number;
                 };
+                lastEncoderStats = next;
+                const frames = next.framesEncoded ?? 0;
+                const ts =
+                  typeof next.timestamp === "number" ? next.timestamp : null;
+                if (
+                  previousFramesEncoded !== null &&
+                  previousTimestamp !== null &&
+                  ts !== null
+                ) {
+                  const deltaFrames = frames - previousFramesEncoded;
+                  const deltaSeconds = (ts - previousTimestamp) / 1000;
+                  if (deltaSeconds > 0) {
+                    evaluateLowFpsWarning(deltaFrames / deltaSeconds);
+                  }
+                }
+                previousFramesEncoded = frames;
+                previousTimestamp = ts;
               }
             });
           } catch {
@@ -282,7 +405,6 @@ export function createMirror(): Mirror {
       };
 
       pc = peer;
-      stream = capture;
       videoTrack = video;
       audioTrack = audio;
 
@@ -292,7 +414,9 @@ export function createMirror(): Mirror {
         if (!sent) return { ok: false, error: state.error ?? "could not send the offer" };
       }
 
-      emit({ status: "waiting", error: null, audio: audio !== null });
+      lastAppliedQuality = request.quality;
+      // Preserva qualquer aviso não-crítico (ex.: bitrate cap) em vez de apagá-lo com error: null.
+      emit({ status: "waiting", error: state.error, audio: audio !== null });
       return { ok: true, stream: capture, audio: audio !== null };
     } catch (err) {
       if (run !== generation) return stopped();
@@ -312,11 +436,14 @@ export function createMirror(): Mirror {
   async function setAudio(on: boolean): Promise<boolean> {
     if (on && (audioSender === null || audioTrack === null)) return false;
     // Main answers with the resulting audio state: false for "off" is success, not refusal.
+    const operation = ++pendingOperation;
     const available = await window.mirror.setAudio(on);
+    if (operation !== pendingOperation) return false;
     if (on && !available) return false;
     if (audioSender === null || audioTrack === null) return true;
 
     await audioSender.replaceTrack(on ? audioTrack : null);
+    if (operation !== pendingOperation) return false;
     audioTrack.enabled = on;
     emit({ audio: on });
     return true;
@@ -325,21 +452,30 @@ export function createMirror(): Mirror {
   async function setQuality(quality: Quality): Promise<boolean> {
     if (videoTrack === null) return true;
     const constraints = videoConstraints(quality);
+    const previous = lastAppliedQuality;
+    const operation = ++pendingOperation;
     try {
       // Empty constraints clear the cap; the capture may keep its current size until it changes.
       await videoTrack.applyConstraints(constraints ?? {});
+      if (operation !== pendingOperation) return false;
       // Reaplica o teto de bitrate fixo ao trocar a qualidade (o bitrate permanece 5 Mbps).
       const videoSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
       if (videoSender !== undefined) {
         try {
           await applyVideoBitrateCap(videoSender, TARGET_BITRATE_BPS, quality);
         } catch (err) {
+          // setParameters falhou após applyConstraints já ter mudado a track: reverta
+          // as constraints para a qualidade anterior para que UI e captura não divirjam.
+          await videoTrack.applyConstraints(videoConstraints(previous) ?? {}).catch(() => undefined);
           const message = err instanceof Error ? err.message : String(err);
           emit({ error: `Could not change quality to ${quality}: ${message}` });
           return false;
         }
       }
+      if (operation !== pendingOperation) return false;
+      lastAppliedQuality = quality;
       emit({ error: null });
+      if (quality === "720p") clearLowFpsWarning();
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

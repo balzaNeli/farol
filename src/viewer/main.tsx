@@ -12,7 +12,7 @@ const link = takePin(window.location.href);
 window.history.replaceState(null, "", link.path);
 const DEBUG = new URLSearchParams(window.location.search).get("debug") === "1";
 
-type Info = { name: string; version: string; pairingOpen: boolean; lockedUntilMs: number };
+type Info = { name: string; version: string; pairingOpen: boolean; lockedUntilMs: number; retryAfterMs: number };
 
 type PairBody = { token?: unknown; error?: unknown; attemptsLeft?: unknown; retryAfterMs?: unknown };
 
@@ -30,7 +30,14 @@ function Viewer() {
     fetch("/api/info")
       .then((response) => response.json() as Promise<Info>)
       .then((value) => {
-        if (active) setInfo(value);
+        if (active) {
+          setInfo(value);
+          // Usa o tempo restante do servidor (retryAfterMs) em vez do timestamp absoluto
+          // lockedUntilMs, para não depender da sincronização de relógios entre host e TV.
+          if (value.retryAfterMs > 0) {
+            setLockedUntil(Date.now() + value.retryAfterMs);
+          }
+        }
       })
       .catch(() => undefined);
     return () => {

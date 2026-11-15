@@ -32,8 +32,8 @@ const MIME: Record<string, string> = {
 
 // The viewer never fetches anything but its own bundle, and it needs no camera or microphone.
 // media-src blob: is for the probe page's loopback test, which plays from an object URL.
-// Adding frame-ancestors, Permissions-Policy, and CORP for defense-in-depth.
-const CSP = "default-src 'self'; connect-src 'self' ws:; img-src 'self' data:; media-src blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; Permissions-Policy: camera=(), microphone=(), display-capture=(), geolocation=(); Cross-Origin-Resource-Policy: same-origin";
+// Adding frame-ancestors and base-uri for defense-in-depth.
+const CSP = "default-src 'self'; connect-src 'self' ws:; img-src 'self' data:; media-src blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 /** Diagnostic pages served from docs/. Fixed names only — no path arithmetic, nothing to escape. */
 const PROBE_FILES: Record<string, string> = {
@@ -66,6 +66,8 @@ function headers(contentType: string): Record<string, string> {
   return {
     "content-type": contentType,
     "content-security-policy": CSP,
+    "permissions-policy": "camera=(), microphone=(), display-capture=(), geolocation=()",
+    "cross-origin-resource-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "cache-control": "no-store",
@@ -217,6 +219,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           version,
           pairingOpen: state.viewer === null,
           lockedUntilMs: state.lockedUntilMs,
+          retryAfterMs: state.retryAfterMs,
         });
       }
       send(res, 404, "text/plain", "not found");
