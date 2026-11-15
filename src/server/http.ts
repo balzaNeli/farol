@@ -219,6 +219,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           version,
           pairingOpen: state.viewer === null,
           lockedUntilMs: state.lockedUntilMs,
+          retryAfterMs: state.retryAfterMs,
         });
       }
       send(res, 404, "text/plain", "not found");

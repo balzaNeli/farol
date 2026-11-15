@@ -28,6 +28,8 @@ export type PairingStatus = {
   pin: string;
   expiresAtMs: number;
   lockedUntilMs: number;
+  /** Tempo restante de lockout em ms, ou 0 quando não há lockout ativo. */
+  retryAfterMs: number;
   viewer: ViewerSession | null;
 };
 
@@ -101,6 +103,7 @@ export function createPairing(options: PairingOptions = {}): Pairing {
       pin,
       expiresAtMs,
       lockedUntilMs,
+      retryAfterMs: lockedUntilMs !== 0 ? Math.max(0, lockedUntilMs - at) : 0,
       viewer: session === null ? null : { id: session.id, connected: session.connected },
     };
   }
