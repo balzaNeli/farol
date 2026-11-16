@@ -13,7 +13,11 @@ try {
 }
 
 const pairing = createPairing();
-const server = await startServer({ port: Number(process.env.PORT) || 4680, pairing });
+const server = await startServer({
+  port: Number(process.env.PORT) || 4680,
+  pairing,
+  mdns: { hostname: "farol.local" },
+});
 const addresses = lanAddresses();
 
 console.log(`screenmirror server listening on port ${server.port}`);

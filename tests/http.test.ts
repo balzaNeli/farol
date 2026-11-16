@@ -328,10 +328,11 @@ test("the mDNS responder is opt-in and closes with the server", async (t) => {
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const server = await startServer({ port: 0, host: "127.0.0.1", ...roots, mdns: { port: 0 } });
-  t.after(async () => {
-    await server.close(); // must not hang on the responder's UDP socket
-  });
   assert.equal(server.mdns, true);
+  await server.close(); // must not hang on the responder's UDP socket
+  // The flag must be live: a responder that died (or was closed) cannot keep the UI advertising
+  // a name that no longer resolves.
+  assert.equal(server.mdns, false);
 });
 
 test("mDNS stays off unless the caller asks for it", async (t) => {

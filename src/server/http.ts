@@ -272,7 +272,10 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   return {
     port,
     hostToken,
-    mdns: mdnsResponder?.active ?? false,
+    /** Live: a responder that died later must not keep the UI advertising a dead name. */
+    get mdns() {
+      return mdnsResponder?.active ?? false;
+    },
     close: async () => {
       await mdnsResponder?.close(); // goodbye packet first, so caches drop farol.local now
       await relay.close(); // terminates sockets, so the http server can close right after
