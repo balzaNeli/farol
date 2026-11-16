@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createSocket, type Socket } from "node:dgram";
 import test from "node:test";
 
 import {
@@ -12,6 +13,7 @@ import {
   mdnsReply,
   parseDnsMessage,
 } from "../src/shared/mdns.ts";
+import { startMdnsResponder } from "../src/server/mdns.ts";
 
 /** A real A query for farol.local, encoded by hand so the parser is not judged by its own encoder. */
 const QUERY_BYTES = Buffer.from([
@@ -242,4 +244,140 @@ test("ignores responses and garbage", () => {
     }),
     null,
   );
+});
+
+/** A bound client socket on loopback: source port is ephemeral, so replies come back unicast. */
+function client(): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = createSocket({ type: "udp4" });
+    socket.once("error", reject);
+    socket.bind(0, "127.0.0.1", () => resolve(socket));
+  });
+}
+
+/** Sends one query at the responder and resolves with the first reply (2 s guard). */
+function ask(socket: Socket, port: number, query: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("no mDNS reply")), 2000);
+    socket.once("message", (buf: Buffer) => {
+      clearTimeout(timer);
+      resolve(buf);
+    });
+    socket.send(query, port, "127.0.0.1", (err) => {
+      if (err !== null) {
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+  });
+}
+
+test("the responder replies over a real UDP socket", async () => {
+  const responder = await startMdnsResponder({
+    hostname: "farol.local",
+    getAddress: () => "127.0.0.1",
+    address: "127.0.0.1",
+    multicast: false,
+    warn: () => undefined,
+  });
+  assert.equal(responder.active, true);
+
+  const socket = await client();
+  const query = buildQuery({ id: 7, name: "farol.local", type: TYPE_A });
+  assert.ok(query !== null);
+  const reply = await ask(socket, responder.port, query);
+  assert.deepEqual(parseDnsMessage(reply), {
+    id: 7,
+    isResponse: true,
+    questions: [{ name: "farol.local", type: TYPE_A, qu: false }],
+    answers: [
+      { name: "farol.local", type: TYPE_A, flush: true, ttl: ANSWER_TTL, address: "127.0.0.1" },
+    ],
+  });
+
+  socket.close();
+  await responder.close();
+});
+
+test("the address is resolved at query time, so an IP change needs no restart", async () => {
+  let address: string | null = "127.0.0.1";
+  const responder = await startMdnsResponder({
+    hostname: "farol.local",
+    getAddress: () => address,
+    address: "127.0.0.1",
+    multicast: false,
+    warn: () => undefined,
+  });
+  const socket = await client();
+  const query = buildQuery({ id: 1, name: "farol.local", type: TYPE_A });
+  assert.ok(query !== null);
+
+  const first = parseDnsMessage(await ask(socket, responder.port, query));
+  address = "10.1.2.3";
+  const second = parseDnsMessage(await ask(socket, responder.port, query));
+
+  assert.ok(first !== null);
+  assert.ok(second !== null);
+  assert.equal(first.answers[0]?.address, "127.0.0.1");
+  assert.equal(second.answers[0]?.address, "10.1.2.3");
+
+  socket.close();
+  await responder.close();
+});
+
+test("close releases the UDP port", async () => {
+  const responder = await startMdnsResponder({
+    hostname: "farol.local",
+    getAddress: () => null,
+    port: 0,
+    address: "127.0.0.1",
+    multicast: false,
+    warn: () => undefined,
+  });
+  await responder.close();
+
+  // Exclusive rebind: it only succeeds if the responder's socket is truly gone.
+  const rebound = await new Promise<boolean>((resolve) => {
+    const socket = createSocket({ type: "udp4" });
+    socket.once("error", () => resolve(false));
+    socket.bind(responder.port, "127.0.0.1", () => {
+      socket.close();
+      resolve(true);
+    });
+  });
+  assert.equal(rebound, true);
+});
+
+test("an occupied port leaves the responder inactive and the caller running", async () => {
+  const holder = await new Promise<Socket>((resolve, reject) => {
+    const socket = createSocket({ type: "udp4" }); // no reuseAddr: Windows binds it exclusively
+    socket.once("error", reject);
+    socket.bind(0, "127.0.0.1", () => resolve(socket));
+  });
+  const warns: string[] = [];
+  const responder = await startMdnsResponder({
+    hostname: "farol.local",
+    getAddress: () => "127.0.0.1",
+    port: holder.address().port,
+    address: "127.0.0.1",
+    multicast: false,
+    warn: (message) => warns.push(message),
+  });
+
+  assert.equal(responder.active, false);
+  assert.ok(warns.length >= 1, "the failure must be warned about, not thrown");
+  await responder.close(); // must resolve without hanging
+  await new Promise<void>((resolve) => holder.close(() => resolve()));
+});
+
+test("the multicast responder shuts down cleanly", async () => {
+  // Ephemeral port so the test never fights the OS mDNS service for 5353; active-or-not is
+  // machine-dependent (firewall, interfaces), but shutdown must always resolve.
+  const responder = await startMdnsResponder({
+    hostname: "farol.local",
+    getAddress: () => "127.0.0.1",
+    port: 0,
+    warn: () => undefined,
+  });
+  await responder.close();
 });
