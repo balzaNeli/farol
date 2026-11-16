@@ -89,6 +89,10 @@ but is not locked at 30 fps yet (tuning follow-up); no fps/`lost` numbers record
 - [x] Task 12: Viewer polish: autoplay-tap, mute/fullscreen/hotkeys, ICE-restart reconnect
 - [x] Task 13: Security pass, README and troubleshooting (Silk accelerated mode, firewall, mDNS)
 - [ ] Task 14: Coverage ≥ 90% on the four pure modules, `npm run verify` gate, full acceptance run
+- [ ] Task 15: mDNS `farol.local` responder — pure DNS codec in `src/shared/mdns.ts` (coverage
+      ratchet) + `node:dgram` glue in `src/server/mdns.ts`, best-effort (HTTP never fails on it),
+      attached to `startServer` via an explicit `mdns` option at both entry points, Host UI shows
+      `http://farol.local:<port>/` first with IP fallback below, README/SPEC notes (rev 6)
 
 ### Checkpoint: Complete
 - [ ] Every success criterion in `SPEC.md` verified, with Fire TV items logged in
