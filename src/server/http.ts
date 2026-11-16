@@ -11,6 +11,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createPairing, type Pairing } from "./pairing.ts";
+import { preferredLanAddress } from "./lan.ts";
+import { startMdnsResponder, type MdnsResponder } from "./mdns.ts";
 import { attachSignalRelay, type ViewerInfo } from "./ws.ts";
 
 // Same depth from src/server/ and dist/server/, so this works before and after a build.
@@ -51,6 +53,16 @@ export type ServerOptions = {
   pairing?: Pairing;
   /** Boot secret for the host socket over loopback; generated here when not injected. */
   hostToken?: string;
+  /**
+   * Opt-in `farol.local` responder. Absent or false keeps the server IP-only; a responder
+   * failure is a warning and never a failed start (see src/server/mdns.ts).
+   */
+  mdns?: {
+    hostname?: string;
+    port?: number;
+    address?: string;
+    warn?: (message: string) => void;
+  } | false;
 };
 
 export type RunningServer = {
@@ -58,6 +70,8 @@ export type RunningServer = {
   close: () => Promise<void>;
   /** The host window needs this to open its own socket to `/ws`. Never sent to a viewer. */
   hostToken: string;
+  /** True when the `farol.local` responder bound and joined the multicast group. */
+  mdns: boolean;
   /** Called when a viewer socket attaches or leaves, so the host window can be pushed new state. */
   onViewerChange: (listener: (viewer: ViewerInfo | null) => void) => void;
 };
@@ -243,10 +257,24 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     },
   });
 
+  let mdnsResponder: MdnsResponder | null = null;
+  const mdnsOptions = options.mdns === false ? null : options.mdns;
+  if (mdnsOptions !== null && mdnsOptions !== undefined) {
+    mdnsResponder = await startMdnsResponder({
+      hostname: mdnsOptions.hostname ?? "farol.local",
+      getAddress: () => preferredLanAddress(),
+      port: mdnsOptions.port,
+      address: mdnsOptions.address,
+      warn: mdnsOptions.warn,
+    });
+  }
+
   return {
     port,
     hostToken,
+    mdns: mdnsResponder?.active ?? false,
     close: async () => {
+      await mdnsResponder?.close(); // goodbye packet first, so caches drop farol.local now
       await relay.close(); // terminates sockets, so the http server can close right after
       await new Promise<void>((resolve, reject) => {
         server.closeAllConnections();
