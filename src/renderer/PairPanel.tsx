@@ -15,6 +15,7 @@ export function PairPanel({ state }: { state: HostState | null }) {
 
   const pin = state?.pin ?? "";
   const urls = state?.urls ?? [];
+  const mdnsUrl = state?.mdnsUrl ?? null;
   const expiresAt = state?.expiresAt ?? 0;
   const seconds =
     pin === "" || expiresAt === 0 ? 0 : Math.max(0, Math.ceil((expiresAt - now) / 1000));
@@ -70,18 +71,31 @@ export function PairPanel({ state }: { state: HostState | null }) {
         {urls.length === 0 ? (
           <p className="muted">Waiting for a LAN address...</p>
         ) : (
-          urls.map((url) => (
-            <div className="url-row" key={url}>
-              <code className="url">{url}</code>
-              <button className="copy-button" type="button" onClick={() => void copyUrl(url)}>
-                {copiedUrl === url ? "Copied" : "Copy"}
-              </button>
-            </div>
-          ))
+          <>
+            {mdnsUrl !== null && (
+              <div className="url-row" key={mdnsUrl}>
+                <code className="url">{mdnsUrl}</code>
+                <button className="copy-button" type="button" onClick={() => void copyUrl(mdnsUrl)}>
+                  {copiedUrl === mdnsUrl ? "Copied" : "Copy"}
+                </button>
+              </div>
+            )}
+            {urls.map((url) => (
+              <div className="url-row" key={url}>
+                <code className="url">{url}</code>
+                <button className="copy-button" type="button" onClick={() => void copyUrl(url)}>
+                  {copiedUrl === url ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ))}
+          </>
         )}
         {copyError !== null && <span className="copy-feedback is-error" role="status">{copyError}</span>}
         {copiedUrl !== null && <span className="copy-feedback" role="status">Address copied.</span>}
-        {urls.length > 1 && <span className="hint">The QR uses the first address.</span>}
+        {mdnsUrl !== null && (
+          <span className="hint">The name follows this PC's IP - nothing to type again after a router change.</span>
+        )}
+        {urls.length > 1 && <span className="hint">The QR uses the first IP address.</span>}
         {state?.viewer !== null && state?.viewer !== undefined && (
           <span className="hint">A viewer is connected. Pairing is paused until it leaves.</span>
         )}

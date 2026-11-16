@@ -64,6 +64,8 @@ function hostState(): HostState {
   const port = server?.port;
   const urls =
     port === undefined ? [] : lanAddresses().map((address) => `http://${address}:${port}/`);
+  const mdnsUrl =
+    port === undefined || server?.mdns !== true ? null : `http://farol.local:${port}/`;
   const pin = status?.pin ?? "";
   const primaryAddress = port === undefined ? null : preferredLanAddress();
   const primary = primaryAddress === null ? null : `http://${primaryAddress}:${port}/`;
@@ -74,6 +76,7 @@ function hostState(): HostState {
       : null;
   return {
     urls,
+    mdnsUrl,
     pin,
     qrDataUrl,
     expiresAt: status?.expiresAtMs ?? 0,
@@ -177,7 +180,7 @@ async function start(): Promise<void> {
 
   try {
     pairing = createPairing();
-    server = await startServer({ pairing });
+    server = await startServer({ pairing, mdns: { hostname: "farol.local" } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     dialog.showErrorBox("Farol", `Could not start the LAN server: ${message}`);

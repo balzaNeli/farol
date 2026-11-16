@@ -10,6 +10,8 @@ export type StartRequest = { sourceId: string; quality: Quality; audio: boolean 
 
 export type HostState = {
   urls: string[];
+  /** `http://farol.local:<port>/` when the mDNS responder is active; null keeps the UI honest. */
+  mdnsUrl: string | null;
   pin: string;
   qrDataUrl: string;
   expiresAt: number;

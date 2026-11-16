@@ -20,6 +20,12 @@ console.log(`screenmirror server listening on port ${server.port}`);
 console.log(`  this machine : http://127.0.0.1:${server.port}`);
 for (const address of addresses) console.log(`  on the LAN   : http://${address}:${server.port}`);
 if (addresses.length === 0) console.warn("  no LAN address found - check your network connection");
+if (server.mdns) {
+  console.log(`  by name      : http://farol.local:${server.port}/  (survives IP changes)`);
+} else {
+  console.warn("  by name      : mDNS responder inactive (port blocked or no multicast interface)");
+  console.warn("                 use the direct-IP addresses above");
+}
 
 // This terminal is the host operator's, the same place the host window will show the PIN.
 // Nothing served over the LAN ever contains it. ASCII only in here: this console is piped,
