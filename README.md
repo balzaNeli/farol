@@ -78,14 +78,20 @@ npm start            # host Electron: captura, URLs de LAN, PIN e QR
 npm run serve        # servidor LAN na porta 4680 (PORT=4681 para mudar), imprime o PIN
 ```
 
-A janela host mostra o QR, as URLs de LAN e o PIN. Escaneie o QR com um celular, ou abra a URL na
-Fire TV e digite o PIN. `http://<lan-ip>:4680/probe` é a sonda de hardware; ela roda as verificações
-seguras (1–4) a partir de um único botão. `npm run serve` roda o visualizador e a API sem captura
-(o PIN é impresso no terminal), para verificações de protocolo.
+A janela host mostra o QR, as URLs de LAN e o PIN. Quando o responder mDNS sobe, a primeira URL da
+janela é `http://farol.local:4680/` — o nome segue o IP atual do PC, então uma troca de IP no
+roteador não pede nova digitação na Fire TV; os endereços por IP continuam logo abaixo como
+fallback, e o QR continua apontando para o IP direto (funciona mesmo se o UDP 5353 estiver
+bloqueado). Se o mDNS estiver inativo (aviso no `npm run serve`, ou a linha do nome não aparece na
+janela host), use os endereços por IP normalmente. `http://<lan-ip>:4680/probe` é a sonda de
+hardware; ela roda as verificações seguras (1–4) a partir de um único botão. `npm run serve` roda o
+visualizador e a API sem captura (o PIN é impresso no terminal), para verificações de protocolo.
 
 ### Fire TV (primeira vez)
 
-1. Na Fire TV, abra o Silk e digite a URL de LAN que o host mostra (`http://<lan-ip>:4680/`).
+1. Na Fire TV, abra o Silk e digite a URL que o host mostra — de preferência o nome
+   `http://farol.local:4680/`, que continua válido quando o IP do PC mudar. Se o nome não abrir,
+   use a URL por IP (`http://<lan-ip>:4680/`).
 2. Marque essa página como favorita no Silk. O rótulo exato do menu varia conforme a versão do Fire OS e do Silk.
 3. Depois, abra o favorito e digite o PIN de seis dígitos; o sexto dígito envia. O QR code é para celulares/tablets, não para o controle remoto da TV.
 
@@ -192,6 +198,7 @@ espelhamento é onde ela quebra:
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
 | Nada carrega na TV | O Firewall do Windows bloqueou o app, ou os dispositivos estão em redes diferentes | Permita o app (Electron, ou Node para `npm run serve`) em redes **Privadas** quando o Windows pedir; se o prompt foi dispensado, adicione uma regra de entrada para o app e a porta impressa (4680 por padrão). Use a URL de LAN exata que o host imprime; um perfil de rede Pública bloqueia |
+| `farol.local` não abre na TV, mas o IP direto funciona | O Firewall bloqueou UDP 5353 (o prompt do Firewall vale TCP e UDP), o roteador bloqueia multicast (isolamento AP/cliente), ou outro responder mDNS tomou a porta | Use a URL por IP favoritada — ela nunca depende de multicast. Para recuperar o nome: permita o app também no UDP 5353 em redes Privadas, coloque os dispositivos na mesma SSID sem isolamento AP, e confira se o `npm run serve` imprime a linha "by name" (o servidor coexiste com o responder mDNS do Windows/Bonjour e cai para IP com um aviso quando não consegue) |
 | A página carrega mas o stream nunca inicia, ou congela após alguns segundos | Isolamento AP/cliente, rede de convidados, VPN no host, ou um roteador que bloqueia ponto a ponto | Coloque ambos os dispositivos na mesma SSID não-convidada, desligue a VPN do host, e cheque a configuração de isolamento de clientes do roteador. O host desativa o esconderijo de candidatos mDNS do Chromium para que seus candidatos sejam IPs de LAN reais, mas um roteador que bloqueia multicast ou um visualizador que só oferece `.local` ainda pode falhar; não há fallback TURN por projeto |
 | O Silk mostra página em branco, vídeo preto ou controles deslocados | Renderização acelerada do Silk em alguns modelos de Fire TV | Desligue a renderização acelerada nas configurações do Silk (o rótulo do menu varia pela versão do Fire OS), recarregue o visualizador, e tente `/probe` para confirmar WebRTC |
 | O vídeo toca mas não há som | O navegador/TV bloqueou autoplay sem som | O vídeo continua tocando mudo. Foque **Press OK for sound** e aperte OK/Enter, ou toque em um celular. No iOS, um toque |
