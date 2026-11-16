@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   ANSWER_TTL,
+  LEGACY_TTL,
   MDNS_PORT,
   TYPE_A,
   TYPE_AAAA,
@@ -157,15 +158,19 @@ test("answers a legacy unicast query to the source with the id echoed", () => {
   });
   assert.ok(reply !== null);
   assert.equal(reply.toSource, true);
+  // RFC 6762 section 6.7: a legacy unicast reply must not carry the cache-flush bit, its TTL
+  // should not exceed ten seconds, and it must echo the question.
   assert.deepEqual(parseDnsMessage(reply.packet), {
     id: 0x1234,
     isResponse: true,
     questions: [{ name: "farol.local", type: TYPE_A, qu: false }],
-    answers: [{ name: "farol.local", type: TYPE_A, flush: true, ttl: 120, address: "10.0.0.5" }],
+    answers: [
+      { name: "farol.local", type: TYPE_A, flush: false, ttl: LEGACY_TTL, address: "10.0.0.5" },
+    ],
   });
 });
 
-test("answers a multicast query on multicast with id 0", () => {
+test("answers a multicast query on multicast with id 0 and no question", () => {
   const reply = mdnsReply(QUERY_BYTES, {
     hostname: "farol.local",
     address: "10.0.0.5",
@@ -176,6 +181,11 @@ test("answers a multicast query on multicast with id 0", () => {
   const parsed = parseDnsMessage(reply.packet);
   assert.ok(parsed !== null);
   assert.equal(parsed.id, 0);
+  // RFC 6762 section 6: responses must not contain questions; only legacy replies echo them.
+  assert.deepEqual(parsed.questions, []);
+  assert.deepEqual(parsed.answers, [
+    { name: "farol.local", type: TYPE_A, flush: true, ttl: ANSWER_TTL, address: "10.0.0.5" },
+  ]);
 });
 
 test("answers a QU query unicast even when it came from port 5353", () => {
@@ -188,6 +198,21 @@ test("answers a QU query unicast even when it came from port 5353", () => {
   });
   assert.ok(reply !== null);
   assert.equal(reply.toSource, true);
+  // A QU reply follows the multicast rules (section 5.4): multicast format, id 0, no question.
+  const parsed = parseDnsMessage(reply.packet);
+  assert.ok(parsed !== null);
+  assert.equal(parsed.id, 0);
+  assert.deepEqual(parsed.questions, []);
+  assert.deepEqual(parsed.answers, [
+    { name: "farol.local", type: TYPE_A, flush: true, ttl: ANSWER_TTL, address: "10.0.0.5" },
+  ]);
+});
+
+test("silently ignores a query with a non-zero OPCODE", () => {
+  // RFC 6762 section 18.3: only OPCODE 0 (a standard query) is understood.
+  const opcodeQuery = Buffer.from(QUERY_BYTES);
+  opcodeQuery[2] = 0x10; // OPCODE 2 ("status")
+  assert.equal(parseDnsMessage(opcodeQuery), null);
 });
 
 test("ignores queries for other names and record types", () => {
@@ -272,7 +297,21 @@ function ask(socket: Socket, port: number, query: Buffer): Promise<Buffer> {
   });
 }
 
-test("the responder replies over a real UDP socket", async () => {
+/** Idempotent dgram close: a failed assert mid-test must never leave the runner hung. */
+function closeOnce(socket: Socket): () => Promise<void> {
+  let closed = false;
+  return () =>
+    new Promise((resolve) => {
+      if (closed) {
+        resolve();
+        return;
+      }
+      closed = true;
+      socket.close(() => resolve());
+    });
+}
+
+test("the responder replies over a real UDP socket", async (t) => {
   const responder = await startMdnsResponder({
     hostname: "farol.local",
     getAddress: () => "127.0.0.1",
@@ -280,26 +319,31 @@ test("the responder replies over a real UDP socket", async () => {
     multicast: false,
     warn: () => undefined,
   });
+  t.after(() => responder.close());
   assert.equal(responder.active, true);
 
   const socket = await client();
+  const closeClient = closeOnce(socket);
+  t.after(closeClient);
+
   const query = buildQuery({ id: 7, name: "farol.local", type: TYPE_A });
   assert.ok(query !== null);
   const reply = await ask(socket, responder.port, query);
+  await closeClient();
+  await responder.close();
+
+  // The client's source port is ephemeral, so this is a legacy unicast reply (RFC 6762 §6.7).
   assert.deepEqual(parseDnsMessage(reply), {
     id: 7,
     isResponse: true,
     questions: [{ name: "farol.local", type: TYPE_A, qu: false }],
     answers: [
-      { name: "farol.local", type: TYPE_A, flush: true, ttl: ANSWER_TTL, address: "127.0.0.1" },
+      { name: "farol.local", type: TYPE_A, flush: false, ttl: LEGACY_TTL, address: "127.0.0.1" },
     ],
   });
-
-  socket.close();
-  await responder.close();
 });
 
-test("the address is resolved at query time, so an IP change needs no restart", async () => {
+test("the address is resolved at query time, so an IP change needs no restart", async (t) => {
   let address: string | null = "127.0.0.1";
   const responder = await startMdnsResponder({
     hostname: "farol.local",
@@ -308,21 +352,24 @@ test("the address is resolved at query time, so an IP change needs no restart", 
     multicast: false,
     warn: () => undefined,
   });
+  t.after(() => responder.close());
+
   const socket = await client();
+  const closeClient = closeOnce(socket);
+  t.after(closeClient);
   const query = buildQuery({ id: 1, name: "farol.local", type: TYPE_A });
   assert.ok(query !== null);
 
   const first = parseDnsMessage(await ask(socket, responder.port, query));
   address = "10.1.2.3";
   const second = parseDnsMessage(await ask(socket, responder.port, query));
+  await closeClient();
+  await responder.close();
 
   assert.ok(first !== null);
   assert.ok(second !== null);
   assert.equal(first.answers[0]?.address, "127.0.0.1");
   assert.equal(second.answers[0]?.address, "10.1.2.3");
-
-  socket.close();
-  await responder.close();
 });
 
 test("close releases the UDP port", async () => {

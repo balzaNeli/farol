@@ -11,6 +11,8 @@ export const MDNS_PORT = 5353;
 export const MDNS_GROUP = "224.0.0.251";
 /** Short TTL: an address change must age out of LAN caches in minutes, not hours. */
 export const ANSWER_TTL = 120;
+/** RFC 6762 section 6.7: a legacy unicast reply's TTL should not exceed ten seconds. */
+export const LEGACY_TTL = 10;
 
 export const TYPE_A = 1;
 export const TYPE_AAAA = 28;
@@ -110,6 +112,9 @@ export function parseDnsMessage(buf: Buffer): DnsMessage | null {
   if (buf.length < 12) return null;
   const id = buf.readUInt16BE(0);
   const flags = buf.readUInt16BE(2);
+  // RFC 6762 section 18.3: messages with an OPCODE other than 0 must be silently ignored, and a
+  // rejected parse is exactly that — the caller drops the packet.
+  if ((flags & 0x7800) !== 0) return null;
   const questionCount = buf.readUInt16BE(4);
   const answerCount = buf.readUInt16BE(6);
   if (questionCount > MAX_QUESTIONS || answerCount > MAX_ANSWERS) return null;
@@ -182,29 +187,38 @@ export function buildResponse(options: {
   question: DnsQuestion;
   address: string | null;
   ttl: number;
+  /** Cache-flush bit on the answer (section 10.2); false for legacy unicast replies (section 6.7). */
+  flush?: boolean;
+  /** Multicast-format responses carry no question (section 6); legacy replies echo it (section 6.7). */
+  echoQuestion?: boolean;
 }): Buffer | null {
+  const flush = options.flush ?? true;
+  const echoQuestion = options.echoQuestion ?? true;
   const name = encodeName(options.question.name);
   if (name === null) return null;
   const octets = options.address === null ? null : ipv4Octets(options.address);
   if (options.address !== null && octets === null) return null;
   const hasAnswer = octets !== null;
 
+  const questionLength = echoQuestion ? name.length + 4 : 0;
   const answerLength = hasAnswer ? name.length + 14 : 0; // name + type+class+ttl+rdlength+rdata
-  const buf = Buffer.alloc(12 + name.length + 4 + answerLength);
+  const buf = Buffer.alloc(12 + questionLength + answerLength);
   buf.writeUInt16BE(options.id & 0xffff, 0);
   buf.writeUInt16BE(0x8400, 2); // QR=1, AA=1, RCODE=0
-  buf.writeUInt16BE(1, 4); // QDCOUNT: echo the question
+  buf.writeUInt16BE(echoQuestion ? 1 : 0, 4); // QDCOUNT
   buf.writeUInt16BE(hasAnswer ? 1 : 0, 6); // ANCOUNT
-  name.copy(buf, 12);
-  let pos = 12 + name.length;
-  buf.writeUInt16BE(options.question.type, pos);
-  buf.writeUInt16BE(options.question.qu ? 0x8001 : 0x0001, pos + 2);
-  pos += 4;
-  if (octets !== null) {
+  let pos = 12;
+  if (echoQuestion) {
     name.copy(buf, pos);
+    buf.writeUInt16BE(options.question.type, pos + name.length);
+    buf.writeUInt16BE(options.question.qu ? 0x8001 : 0x0001, pos + name.length + 2);
+    pos += name.length + 4;
+  }
+  if (octets !== null) {
+    name.copy(buf, pos); // uncompressed answer name: two names in 30-odd bytes total
     pos += name.length;
     buf.writeUInt16BE(TYPE_A, pos);
-    buf.writeUInt16BE(0x8001, pos + 2); // cache-flush: this record is unique, replace it
+    buf.writeUInt16BE(flush ? 0x8001 : 0x0001, pos + 2); // cache-flush: this record is unique, replace it
     buf.writeUInt32BE(options.ttl, pos + 4);
     buf.writeUInt16BE(4, pos + 8);
     buf.writeUInt8(octets[0], pos + 10);
@@ -236,10 +250,19 @@ export function mdnsReply(
 
   const answerAddress = question.type === TYPE_A ? options.address : null;
   if (question.type === TYPE_A && answerAddress === null) return null;
-  const toSource = question.qu || options.sourcePort !== MDNS_PORT;
-  // Multicast responses carry id 0 (RFC 6762 section 18.1); unicast replies echo the query id.
-  const packet = buildResponse({ id: toSource ? message.id : 0, question, address: answerAddress, ttl: ANSWER_TTL });
+  // RFC 6762 section 6.7: a legacy unicast reply (querier on a port other than 5353, and no QU
+  // bit) must not carry the cache-flush bit, should keep the TTL at or under ten seconds, and
+  // must echo the question. QU replies follow the multicast rules (section 5.4) instead.
+  const legacy = !question.qu && options.sourcePort !== MDNS_PORT;
+  const packet = buildResponse({
+    id: legacy ? message.id : 0,
+    question,
+    address: answerAddress,
+    ttl: legacy ? LEGACY_TTL : ANSWER_TTL,
+    flush: !legacy,
+    echoQuestion: legacy,
+  });
   if (packet === null) return null;
 
-  return { packet, toSource };
+  return { packet, toSource: question.qu || options.sourcePort !== MDNS_PORT };
 }
