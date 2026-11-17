@@ -39,7 +39,7 @@ select:disabled {
 }
 
 .host {
-  width: min(100%, 960px);
+  width: min(100%, 1240px);
   min-height: 100vh;
   margin: 0 auto;
   padding: clamp(20px, 4vh, 36px) 24px;
@@ -491,11 +491,13 @@ select:disabled {
   color: var(--farol-color-ink-muted-48);
 }
 
+/* The preview stage is the element that should visibly grow with the window. One fluid height
+   for both states keeps the layout stable when mirroring starts (no shift), and the fluid cap
+   replaces the fixed 180px that made a maximized window look like a small one. */
 .preview,
 .preview-placeholder {
   width: 100%;
-  min-height: 112px;
-  max-height: 180px;
+  height: clamp(180px, 30vh, 440px);
   border-radius: 12px;
 }
 

@@ -145,6 +145,30 @@ function installPermissions(hostContentsId: number): void {
   });
 }
 
+/**
+ * Content-scale steps: on large windows the whole UI grows (fonts, cards, preview) instead of
+ * leaving the fixed-width layout centered in empty space. Quantized, so the layout does not
+ * "breathe" while the window edge is dragged; `webContents.setZoomFactor` is the Chromium page
+ * zoom, which keeps media queries and viewport units consistent with the applied scale. The
+ * default 980x760 window stays at 1.0, untouched.
+ */
+const ZOOM_STEPS: Array<{ minWidth: number; factor: number }> = [
+  { minWidth: 1700, factor: 1.3 },
+  { minWidth: 1400, factor: 1.15 },
+  { minWidth: 0, factor: 1 },
+];
+let appliedZoomFactor = 0;
+
+function applyContentScale(win: BrowserWindow): void {
+  const width = win.getContentSize()[0] ?? 0;
+  const step = ZOOM_STEPS.find((entry) => width >= entry.minWidth);
+  const factor = step === undefined ? 1 : step.factor;
+  if (factor !== appliedZoomFactor) {
+    appliedZoomFactor = factor;
+    win.webContents.setZoomFactor(factor);
+  }
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 980,
@@ -164,6 +188,8 @@ function createWindow(): BrowserWindow {
   });
 
   win.once("ready-to-show", () => win.show());
+  win.webContents.once("did-finish-load", () => applyContentScale(win));
+  win.on("resize", () => applyContentScale(win));
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.on("closed", () => {
