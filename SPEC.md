@@ -209,21 +209,28 @@ before the offer.
 The server answers mDNS queries (UDP `5353`, multicast `224.0.0.251`) for the **A record** of
 `farol.local` with the preferred physical IPv4 (the `lan.ts` ranking), TTL **120 s**, re-evaluated
 **per query** — so a router-side IP change is answered with the new address on the next lookup,
-no restart. Query handling: legacy unicast queries (source port ≠ 5353) are answered unicast with
-the query id echoed; multicast queries are answered on multicast with id 0; a question carrying the
-QU bit is answered unicast. AAAA questions for `farol.local` are answered with **zero answers**
-(faster than letting the resolver time out).
+no restart. Because nothing tells the process the router changed the IP, the responder polls its
+address every **5 s** and, on a change, **re-announces the record twice, 1 s apart** (RFC 6762
+§8.3/§8.4) so caches flush the old address instead of serving it for the rest of the TTL. Query
+handling: legacy unicast queries (source port ≠ 5353, no QU bit) are answered unicast with the
+query id echoed, **no cache-flush bit and a TTL of 10 s** (§6.7 — legacy resolvers have no cache
+coherence); multicast queries are answered on multicast with id 0 and no question echoed (§6); a
+question carrying the QU bit is answered unicast in multicast format (§5.4). AAAA questions for
+`farol.local` are answered with **zero answers** (faster than letting the resolver time out), and
+anything with a non-zero OPCODE is ignored (§18.3).
 
 - Pure packet codec: `src/shared/mdns.ts` (`parseDnsMessage`, `buildQuery`, `buildResponse`,
   `mdnsReply`) — covered by the coverage ratchet; the dgram responder: `src/server/mdns.ts`.
 - **Best-effort by contract**: a bind or membership failure (UDP 5353 blocked by firewall policy,
   or another responder holding the port exclusively) logs one non-critical warning and leaves the
-  server up by IP. `RunningServer.mdns` reports whether the responder is active, and
+  server up by IP. `RunningServer.mdns` is a **live getter** — a responder that died later stops
+  being advertised instead of the UI lying about a name that no longer resolves — and
   `scripts/serve.mjs` prints the same.
 - Lifecycle: the responder exists only when `startServer` receives
-  `mdns: { hostname?, port?, warn? }` — `src/main/main.ts` and `scripts/serve.mjs` both pass
-  `hostname: "farol.local"` — and `server.close()` shuts it down cleanly, first sending a
-  **TTL-0 goodbye** so LAN caches drop the name immediately.
+  `mdns: { hostname?, port?, address?, warn? }` — `src/main/main.ts` and `scripts/serve.mjs` both
+  pass `hostname: "farol.local"` — and `server.close()` shuts it down cleanly, first sending a
+  **TTL-0 goodbye** so LAN caches drop the name immediately (skipped when there is no address to
+  say goodbye with).
 - No new dependencies (`node:dgram` only). `SO_REUSEADDR` coexists with the Windows mDNS
   responder / Bonjour, which only answer names registered on the machine — `farol.local` is not
   one of them, so there is no record-set conflict (RFC 6762 §12).

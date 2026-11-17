@@ -54,6 +54,53 @@ viewer receive-only; cobertura ≥ 95,88% (ratchet); sem supressões (`@ts-ignor
 - [x] `npx tsc -p tsconfig.json` limpo (exit 0)
 - [ ] Stage sem `--gpg-sign` para o usuário assinar
 
+## Etapa 7 — Revisão fresh-context e passe de correções
+Revisor subagent sobre `6115105..969833e`: **Ready to merge — With fixes** (C1, I1–I3, M1–M9).
+Cada correção foi RED → GREEN, com commit próprio:
+
+- [x] Fix 1 (C1 + I3, commit 4aba79e): `scripts/serve.mjs` não passava `mdns` — o SPEC, o README
+      e a decisão (e) prometiam o nome no `npm run serve`, e o aviso sempre impresso mentia;
+      agora passa `mdns: { hostname: "farol.local" }`. `RunningServer.mdns` virou **getter vivo**
+      (uma morte tardia do responder não deixa a UI anunciando nome morto), testado com assert
+      pós-close. Bug do teste no caminho: close duplo (corpo + hook) → ERR_SERVER_NOT_RUNNING.
+- [x] Fix 2 (I1 + M4 + M5, commit f650e8f): respostas legacy unicast (porta origem ≠ 5353, sem
+      QU) agora **sem cache-flush, TTL 10 s e com a questão ecoada** (RFC 6762 §6.7 — resolvers
+      legacy não têm coerência de cache; TTL 120 mantinha IP velho por 2 min exatamente no
+      cenário que motivou a feature); multicast/QU em formato multicast (id 0, sem questão, §6;
+      QU unicast em formato multicast, §5.4); OPCODE ≠ 0 rejeitado no parser (§18.3). Ajustes
+      colaterais: os dois testes de socket real atualizados ao formato legacy + teardown
+      idempotente (`closeOnce`) — um assert falhando no meio deixava o socket do cliente aberto
+      e pendurava o runner.
+- [x] Fix 3 (I2 + M1/M2/M3, commit 24c710e): **re-anúncio na troca de IP** (§8.4 MUST) — poll
+      injetável de 5 s (`changePollMs`), dois anúncios com 1 s de gap (`announceGapMs`, §8.3),
+      `lastAnnounced` tomado no boot; teste novo com **observador real** (socket no grupo
+      224.0.0.251:5353 com `setMulticastLoopback(true)` explícito) que também prova o poll parado
+      pós-close. Aviso único por falha de bind (handler genérico registrado só pós-bind);
+      goodbye pulado quando não há endereço; goodbye/anúncios em formato multicast (sem
+      questão); timers com `unref()` e limpos em todo caminho de stop. Teste de porta ocupada:
+      holder fechado em `t.after` idempotente (o close no corpo após o assert pendurava o runner).
+- [x] Fix 4 (docs, este commit): SPEC rev 6 alinhado (legacy TTL/flush/eco, re-anúncio, getter
+      vivo, opções novas), README PT/EN com linha "dois Farol no mesmo LAN" (M9), Task 15
+      marcado com nota do check pendente (M6), este ledger.
+
+## Rulings do executor (itens que o revisor deixou "declined to judge")
+- **Dois Farol no mesmo LAN** (probing/conflito, §9): adiado — fora de escopo por design; docs
+  viraram a linha de troubleshooting acima.
+- **Anúncios não solicitados no boot** (§8.3): adiado — responder passivo basta para resolução
+  on-demand na navegação; o re-anúncio por MUDANÇA de IP foi implementado no Fix 3.
+- **Atraso aleatório de 20–120 ms nas respostas** (§6 SHOULD): dispensado — o §6 dispensa o
+  atraso para registro único de hostname; risco de colisão desprezível.
+- **Resposta QU multicast quando o registro não foi anunciado recentemente** (§5.4): dispensado
+  — irrelevante para um único registro; absorvido no formato multicast do Fix 2.
+- **Known-answer suppression (§7.1) / multipacket TC**: fora de escopo (mantido).
+- **NSEC negativo para AAAA** (§6.1): mantida a decisão pré-aprovada (c) — resposta vazia.
+- **Off-by-one no limite de 255 bytes do nome**: não mudar — inalcançável (só `farol.local` é
+  construído; nomes gigantes que chegam já são rejeitados pelas guardas do parser).
+- **Checagem de origem on-link para queries unicast** (§5.5): adiado — mesma exposição do HTTP
+  (bound 0.0.0.0, responde a quem conectar); endurecimento futuro, não regressão.
+- **`RunningServer.hostname`** (recommendation): adiado — `main.ts` e `serve.mjs` fixam
+  `farol.local`; o risco de a UI mentir só existe se alguém configurar outro nome.
+
 ## Fora de escopo (não fazer)
 - Anúncio Bonjour completo (PTR `_http._tcp.local`, browse) — cortado no design
 - Resposta a TXT/SRV, known-answer suppression (§7.1), NAT-PMP — não pedidos
@@ -62,4 +109,5 @@ viewer receive-only; cobertura ≥ 95,88% (ratchet); sem supressões (`@ts-ignor
 ## Pendente para o usuário (manual)
 - [ ] Verificar na Fire TV que o Silk resolve `farol.local` (Chromium tem resolver mDNS próprio);
       se não resolver, o IP favoritado continua como fallback (não é regressão)
-- [ ] Assinar os commits com sua chave GPG (foram criados com `--no-gpg-sign` e estão staged/na dev)
+- [ ] Assinar os commits com sua chave GPG (todos foram criados com `--no-gpg-sign` e estão na
+      dev; o range completo da Task 15 é `6115105..HEAD`)
