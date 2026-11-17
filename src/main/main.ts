@@ -121,7 +121,7 @@ function sendToViewer(signal: Signal): void {
   }
 }
 
-/** display-capture for the host page; every other permission is denied. */
+/** display-capture and the pairing card's clipboard writes for the host page; all else denied. */
 function installPermissions(hostContentsId: number): void {
   const isHost = (contents: WebContents | null): boolean =>
     contents !== null && contents.id === hostContentsId;
@@ -129,15 +129,19 @@ function installPermissions(hostContentsId: number): void {
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
     // Electron reports getDisplayMedia as a "media" request, not "display-capture". Allow it only
     // for the host page and only while a source is armed; the display-media handler below is what
-    // actually authorizes the capture. Any other media request (camera, mic) stays denied.
+    // actually authorizes the capture. clipboard-sanitized-write backs the pairing card's Copy
+    // buttons (navigator.clipboard.writeText). Any other media request (camera, mic) stays denied.
     const allowed =
-      permission === "display-capture"
-        ? isHost(contents)
-        : permission === "media" && isHost(contents) && capture.get() !== null;
+      (permission === "display-capture" && isHost(contents)) ||
+      (permission === "media" && isHost(contents) && capture.get() !== null) ||
+      (permission === "clipboard-sanitized-write" && isHost(contents));
     callback(allowed);
   });
   session.defaultSession.setPermissionCheckHandler((contents, permission) => {
-    return permission === "display-capture" && isHost(contents);
+    return (
+      (permission === "display-capture" || permission === "clipboard-sanitized-write") &&
+      isHost(contents)
+    );
   });
 }
 

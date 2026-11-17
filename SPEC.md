@@ -379,8 +379,11 @@ export const audioModeFor = (platform: NodeJS.Platform): "loopback" | null =>
 exposes the 9 functions above and nothing else. `setWindowOpenHandler` → deny;
 `will-navigate` → deny. Renderer loads local files only. CSP on every served page:
 `default-src 'self'; connect-src 'self' ws:; img-src 'self' data:`. Permission requests:
-`display-capture` allowed for the host page, everything else (`media`, `hid`, `usb`,
-`notifications`, `geolocation`, …) denied.
+`display-capture` allowed for the host page, `media` allowed for the host page only while a
+capture source is armed (Electron reports `getDisplayMedia` as `media`), and
+`clipboard-sanitized-write` allowed for the host page so the pairing card's Copy buttons can
+write `navigator.clipboard`; everything else (`hid`, `usb`, `notifications`, `geolocation`, …)
+denied.
 
 Explicitly accepted risks, with mitigation:
 - **The pairing PIN and session token travel over plain HTTP on the LAN.** 60 s TTL, single use,
