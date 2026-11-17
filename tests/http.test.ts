@@ -324,6 +324,9 @@ test("POST /api/pair: malformed bodies are 400 and are never counted as attempts
 });
 
 test("the mDNS responder is opt-in and closes with the server", async (t) => {
+  // Needs a machine with a joinable multicast interface (any normal LAN machine): on a box with
+  // no network at all the responder would be inactive and this would fail — mdns.test.ts covers
+  // that path machine-independently.
   const { root, ...roots } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
 

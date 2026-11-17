@@ -7,10 +7,16 @@
  * once and reports `active: false` — it never throws at the caller, and the LAN server keeps
  * working by direct IP. The socket is closed cleanly by `close()`, which first sends a TTL-0
  * goodbye so LAN caches drop the name immediately instead of at TTL expiry.
+ *
+ * RFC 6762 section 8.4: when the host's address changes, the address record MUST be re-announced
+ * — twice, about a second apart (section 8.3) — so caches flush the old address instead of
+ * serving it for the rest of the TTL. A short poll samples `getAddress()`, because nothing
+ * tells the process that the router handed out a new IP.
  */
 import { createSocket, type RemoteInfo } from "node:dgram";
 
 import {
+  ANSWER_TTL,
   MDNS_GROUP,
   MDNS_PORT,
   TYPE_A,
@@ -29,6 +35,10 @@ export type MdnsResponderOptions = {
   address?: string;
   /** Join the multicast group and answer on it; false keeps the socket unicast-only (tests). */
   multicast?: boolean;
+  /** Default 5000 ms: how often the responder looks for an address change. */
+  changePollMs?: number;
+  /** Default 1000 ms: the gap between the two re-announcements (RFC 6762 section 8.3). */
+  announceGapMs?: number;
   /** Default: console.warn with a `[farol mdns]` prefix. */
   warn?: (message: string) => void;
 };
@@ -42,21 +52,38 @@ export type MdnsResponder = {
   close: () => Promise<void>;
 };
 
+const DEFAULT_CHANGE_POLL_MS = 5000;
+const DEFAULT_ANNOUNCE_GAP_MS = 1000;
+
 export async function startMdnsResponder(
   options: MdnsResponderOptions,
 ): Promise<MdnsResponder> {
-  const warn =
-    options.warn ??
-    ((message: string) => console.warn(`[farol mdns] ${message}`));
+  const warn = options.warn ?? ((message: string) => console.warn(`[farol mdns] ${message}`));
   const port = options.port ?? MDNS_PORT;
   const address = options.address ?? "0.0.0.0";
   const multicast = options.multicast !== false;
+  const changePollMs = options.changePollMs ?? DEFAULT_CHANGE_POLL_MS;
+  const announceGapMs = options.announceGapMs ?? DEFAULT_ANNOUNCE_GAP_MS;
 
   const socket = createSocket({ type: "udp4", reuseAddr: true });
   let active = false;
   let stopped = false;
+  let pollTimer: NodeJS.Timeout | null = null;
+  let announceTimer: NodeJS.Timeout | null = null;
+
+  const stopTimers = (): void => {
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    if (announceTimer !== null) {
+      clearTimeout(announceTimer);
+      announceTimer = null;
+    }
+  };
 
   const stopSocket = (afterClose?: () => void): void => {
+    stopTimers();
     if (stopped) {
       afterClose?.();
       return;
@@ -68,6 +95,44 @@ export async function startMdnsResponder(
       warn(`could not close the mDNS socket: ${err instanceof Error ? err.message : String(err)}`);
       afterClose?.();
     }
+  };
+
+  /**
+   * One unsolicited multicast announcement (or the goodbye at TTL 0): multicast format, id 0,
+   * no question (RFC 6762 section 6), cache-flush so caches replace the record they hold.
+   * A null address announces nothing — an empty record would only waste the wire.
+   */
+  const announce = (recordAddress: string | null, ttl: number, done?: () => void): void => {
+    if (stopped || recordAddress === null) {
+      done?.();
+      return;
+    }
+    const packet = buildResponse({
+      id: 0,
+      question: { name: options.hostname, type: TYPE_A, qu: false },
+      address: recordAddress,
+      ttl,
+      flush: true,
+      echoQuestion: false,
+    });
+    if (packet === null) {
+      done?.();
+      return;
+    }
+    socket.send(packet, MDNS_PORT, MDNS_GROUP, (err) => {
+      if (err !== null) warn(`could not send an mDNS announcement: ${err.message}`);
+      done?.();
+    });
+  };
+
+  /** RFC 6762 section 8.3: announce at least twice, one second apart. */
+  const announceTwice = (recordAddress: string): void => {
+    announce(recordAddress, ANSWER_TTL);
+    announceTimer = setTimeout(() => {
+      announceTimer = null;
+      announce(recordAddress, ANSWER_TTL);
+    }, announceGapMs);
+    announceTimer.unref();
   };
 
   socket.on("message", (buf: Buffer, rinfo: RemoteInfo) => {
@@ -84,13 +149,6 @@ export async function startMdnsResponder(
     socket.send(reply.packet, destination.port, destination.address, (err) => {
       if (err !== null) warn(`could not send an mDNS reply: ${err.message}`);
     });
-  });
-
-  socket.on("error", (err) => {
-    if (stopped) return;
-    active = false;
-    warn(`mDNS responder stopped: ${err.message}`);
-    stopSocket();
   });
 
   const outcome = await new Promise<{ ok: boolean; port: number }>((resolve) => {
@@ -137,6 +195,13 @@ export async function startMdnsResponder(
       } catch (err) {
         warn(`could not set the multicast TTL: ${err instanceof Error ? err.message : String(err)}`);
       }
+      try {
+        // Deliver our own announcements to local members too: the observer in the tests relies
+        // on it, and Node does not guarantee which way the OS default goes.
+        socket.setMulticastLoopback(true);
+      } catch (err) {
+        warn(`could not enable multicast loopback: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       if (joined === 0) {
         warn(`no multicast membership could be joined: ${joinErrors.join("; ")}`);
@@ -144,6 +209,17 @@ export async function startMdnsResponder(
       } else {
         active = true;
         socket.on("error", onLateError);
+
+        // The address at boot is the baseline: the poll announces only real changes.
+        let lastAnnounced = options.getAddress();
+        pollTimer = setInterval(() => {
+          if (stopped || !active) return;
+          const current = options.getAddress();
+          if (current === null || current === lastAnnounced) return;
+          lastAnnounced = current;
+          announceTwice(current);
+        }, changePollMs);
+        pollTimer.unref();
       }
     } else {
       // Unicast-only mode (tests): nothing else to set up.
@@ -171,20 +247,10 @@ export async function startMdnsResponder(
           stopSocket(finish);
           return;
         }
-        // Goodbye first (TTL 0), then close: caches drop the name instead of holding it 120 s.
-        const goodbye = buildResponse({
-          id: 0,
-          question: { name: options.hostname, type: TYPE_A, qu: false },
-          address: options.getAddress(),
-          ttl: 0,
-        });
-        if (goodbye === null) {
-          active = false;
-          stopSocket(finish);
-          return;
-        }
         active = false;
-        socket.send(goodbye, MDNS_PORT, MDNS_GROUP, () => stopSocket(finish));
+        // Goodbye first (TTL 0), then close: caches drop the name instead of holding it 120 s.
+        // announce() skips the packet entirely when there is no address to say goodbye with.
+        announce(options.getAddress(), 0, () => stopSocket(finish));
       }),
   };
 }

@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   ANSWER_TTL,
   LEGACY_TTL,
+  MDNS_GROUP,
   MDNS_PORT,
   TYPE_A,
   TYPE_AAAA,
@@ -13,8 +14,10 @@ import {
   buildResponse,
   mdnsReply,
   parseDnsMessage,
+  type DnsMessage,
 } from "../src/shared/mdns.ts";
 import { startMdnsResponder } from "../src/server/mdns.ts";
+import { rankedLanAddresses } from "../src/server/lan.ts";
 
 /** A real A query for farol.local, encoded by hand so the parser is not judged by its own encoder. */
 const QUERY_BYTES = Buffer.from([
@@ -395,12 +398,14 @@ test("close releases the UDP port", async () => {
   assert.equal(rebound, true);
 });
 
-test("an occupied port leaves the responder inactive and the caller running", async () => {
+test("an occupied port leaves the responder inactive and the caller running", async (t) => {
   const holder = await new Promise<Socket>((resolve, reject) => {
     const socket = createSocket({ type: "udp4" }); // no reuseAddr: Windows binds it exclusively
     socket.once("error", reject);
     socket.bind(0, "127.0.0.1", () => resolve(socket));
   });
+  const closeHolder = closeOnce(holder);
+  t.after(closeHolder);
   const warns: string[] = [];
   const responder = await startMdnsResponder({
     hostname: "farol.local",
@@ -412,9 +417,11 @@ test("an occupied port leaves the responder inactive and the caller running", as
   });
 
   assert.equal(responder.active, false);
-  assert.ok(warns.length >= 1, "the failure must be warned about, not thrown");
+  // The contract is one non-critical warning: the pre-bind generic listener and the bind-failure
+  // listener used to fire on the same event and warn twice.
+  assert.equal(warns.length, 1, "the failure must be warned about exactly once, not thrown");
   await responder.close(); // must resolve without hanging
-  await new Promise<void>((resolve) => holder.close(() => resolve()));
+  await closeHolder();
 });
 
 test("the multicast responder shuts down cleanly", async () => {
@@ -427,4 +434,100 @@ test("the multicast responder shuts down cleanly", async () => {
     warn: () => undefined,
   });
   await responder.close();
+});
+
+test("re-announces twice when the address changes, then goes quiet after close", async (t) => {
+  // RFC 6762 section 8.4: an address change must be re-announced (twice, a second apart, section
+  // 8.3) so caches flush instead of serving a stale IP for the rest of the TTL.
+  if (rankedLanAddresses().length === 0) {
+    t.skip("needs a joinable multicast interface");
+    return;
+  }
+
+  let address: string | null = "10.9.8.7";
+  const responder = await startMdnsResponder({
+    hostname: "farol.local",
+    getAddress: () => address,
+    changePollMs: 20,
+    announceGapMs: 30,
+    warn: () => undefined,
+  });
+  t.after(() => responder.close());
+  assert.equal(responder.active, true);
+
+  // A second socket joined to the group on port 5353 hears the responder's announcements.
+  const seen: DnsMessage[] = [];
+  const ear = createSocket({ type: "udp4", reuseAddr: true });
+  let earClosed = false;
+  const closeEar = (): Promise<void> =>
+    new Promise((resolve) => {
+      if (earClosed) {
+        resolve();
+        return;
+      }
+      earClosed = true;
+      ear.close(() => resolve());
+    });
+  t.after(closeEar);
+  await new Promise<void>((resolve) => ear.bind(MDNS_PORT, "0.0.0.0", () => resolve()));
+  ear.addMembership(MDNS_GROUP);
+  const farolAnswer = (parsed: DnsMessage | null): boolean =>
+    parsed !== null &&
+    parsed.isResponse &&
+    parsed.answers.some(
+      (answer) => answer.name === "farol.local" && answer.type === TYPE_A,
+    );
+  ear.on("message", (buf: Buffer) => {
+    const parsed = parseDnsMessage(buf);
+    if (farolAnswer(parsed) && parsed !== null) seen.push(parsed);
+  });
+
+  address = "10.1.2.3";
+  const deadline = Date.now() + 2000;
+  while (seen.length < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(seen.length >= 2, "both re-announcements must arrive");
+
+  const expected = {
+    name: "farol.local",
+    type: TYPE_A,
+    flush: true,
+    ttl: ANSWER_TTL,
+    address: "10.1.2.3",
+  };
+  const first = seen[0];
+  const second = seen[1];
+  assert.deepEqual(first?.answers, [expected]);
+  assert.deepEqual(second?.answers, [expected]);
+  assert.deepEqual(first?.questions, []); // multicast format carries no question
+
+  await closeEar();
+  await responder.close();
+
+  // The poll must be gone with the responder: a further change announces nothing.
+  const after: DnsMessage[] = [];
+  const lateEar = createSocket({ type: "udp4", reuseAddr: true });
+  let lateClosed = false;
+  t.after(
+    () =>
+      new Promise<void>((resolve) => {
+        if (lateClosed) {
+          resolve();
+          return;
+        }
+        lateClosed = true;
+        lateEar.close(() => resolve());
+      }),
+  );
+  await new Promise<void>((resolve) => lateEar.bind(MDNS_PORT, "0.0.0.0", () => resolve()));
+  lateEar.addMembership(MDNS_GROUP);
+  lateEar.on("message", (buf: Buffer) => {
+    const parsed = parseDnsMessage(buf);
+    if (farolAnswer(parsed) && parsed !== null) after.push(parsed);
+  });
+
+  address = "10.4.4.4";
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(after.length, 0, "a closed responder must not announce");
 });
