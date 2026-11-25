@@ -33,7 +33,7 @@ Last reviewed: 2026-11-15
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |----|------|------|--------|-------|---------|
-| (none) | — | — | — | — | — |
+| EX-001 | Resolution never reduced as an escape valve | `src/renderer/mirror.ts` (bloco `qualityLimitationReason === "cpu"`) | Válvula restrita à pressão de CPU do encoder no host: `scaleResolutionDownBy` vai a 1.5 apenas enquanto o motivo for `"cpu"` e volta a 1.0 em `"none"`. Não cobre oscilação de LAN — nela seguem valendo 1080p fixo e queda de fps. Reavaliar quando a Fase 2 implementar bitrate/resolução adaptativos. | Fase 1 / Item 5 (plano de otimizações) | 2027-02-23 |
 
 ## Architecture boundaries (non-negotiable, from AGENTS.md / SPEC.md)
 
@@ -44,4 +44,4 @@ Last reviewed: 2026-11-15
 - **Signaling verbatim:** `/ws` relays `Signal` frames verbatim and never parses SDP.
 - **CSP strict:** every served response carries strict CSP; no inline `<script>`/`<style>`.
 - **PIN pad is buttons:** never an `<input>` (Silk on-screen keyboard breaks the remote-only flow).
-- **Resolution never reduced as an escape valve:** approach (b) — keep 1080p, accept frame drops when the LAN oscillates.
+- **Resolution never reduced as an escape valve:** approach (b) — keep 1080p, accept frame drops when the LAN oscillates. Única exceção registrada: EX-001 (pressão de CPU do encoder, não oscilação de LAN).
