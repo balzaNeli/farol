@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-13 by implementation agent
+Last reviewed: 2026-11-15
 
 ## Floor (always enforced, no setup required)
 
@@ -16,7 +16,7 @@ Last reviewed: 2026-11-13 by implementation agent
 |-----------|------|-----------|---------|
 | Types | Zero type errors | `npx tsc -p tsconfig.json` | every edit |
 | Lint | Zero warnings/errors | `npm run lint` (`eslint . --max-warnings 0`) | every edit |
-| Coverage | Project coverage ≥ 95.88% (ratchet from today) | `npm run coverage` | task end |
+| Coverage | Pure-module coverage ≥ 95.88% (ratchet; raise the floor percentage when coverage rises) | `npm run coverage` | task end |
 | Security: code | No STUN/TURN servers; viewer receive-only | `npm run check:gates` | task end |
 | Security: architecture | `RTC_CONFIG.iceServers` empty & frozen; viewer has no capture APIs; host on `file://`; `/ws` relays `Signal` frames verbatim, never parses SDP | `npm run check:gates` | task end |
 | `npm run verify` | All checks green: lint + test + coverage + build + gates | `npm run verify` | before commit |
@@ -25,7 +25,7 @@ Last reviewed: 2026-11-13 by implementation agent
 
 | Metric | Today | Direction |
 |--------|-------|-----------|
-| Project coverage | 95.88% | must not fall |
+| Pure-module coverage | 95.88% | must not fall (update floor if `npm run coverage` rises) |
 | (Performance budgets) | not yet measured | Lighthouse needs a running URL (Fire TV / preview) |
 | (Accessibility) | not yet measured | needs WCAG rules written first |
 
@@ -37,6 +37,7 @@ Last reviewed: 2026-11-13 by implementation agent
 
 ## Architecture boundaries (non-negotiable, from AGENTS.md / SPEC.md)
 
+- **Minimal runtime dependencies:** only `ws` and `qrcode` are allowed in runtime `dependencies`; prefer Node.js and browser built-ins (`node:dgram`, `node:crypto`, WebRTC, etc.).
 - **Viewer is receive-only:** no `getUserMedia`, `getDisplayMedia`, `navigator.mediaDevices`, or any media feature test in `src/viewer` or `dist/viewer`. Enforced by `check:gates`.
 - **No STUN/TURN, ever:** `RTC_CONFIG.iceServers` stays empty and frozen in `src/` and `dist/`. Enforced by `check:gates`.
 - **Host page on `file://`:** never served by the HTTP server; PIN/QR material stays on the host window.
