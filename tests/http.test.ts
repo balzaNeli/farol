@@ -233,7 +233,7 @@ test("POST /api/pair: wrong PIN, three strikes, lockout, and the PIN is never ec
   // The right PIN does not open a locked door either, and the refusal costs no attempt.
   assert.equal((await pair(pin)).status, 429);
 
-  clock += 60_000; // the lockout expires, and a fresh PIN is on screen with it
+  clock += 120_000; // lockout global expira (60 s) e o backoff per-IP também (120 s)
   const fresh = pairing.status();
   assert.equal(fresh.lockedUntilMs, 0);
   assert.notEqual(fresh.pin, pin);

@@ -36,6 +36,8 @@ let quitting = false;
 let qrDataUrl = "";
 let qrPayload = "";
 let qrError: string | null = null;
+let qrVersion = 0;
+let lastQrDataUrl = "";
 
 /** Main renders the QR; regenerate when the address or PIN changes and never show the old one. */
 function refreshQr(base: string | null, pin: string): void {
@@ -70,6 +72,11 @@ function hostState(): HostState {
   const primaryAddress = port === undefined ? null : preferredLanAddress();
   const primary = primaryAddress === null ? null : `http://${primaryAddress}:${port}/`;
   refreshQr(primary, pin);
+  const qrChanged = qrDataUrl !== lastQrDataUrl;
+  if (qrChanged) {
+    qrVersion += 1;
+    lastQrDataUrl = qrDataUrl;
+  }
   const noLan =
     port !== undefined && urls.length === 0
       ? "No LAN address found. Connect this computer to Wi-Fi or Ethernet."
@@ -78,7 +85,8 @@ function hostState(): HostState {
     urls,
     mdnsUrl,
     pin,
-    qrDataUrl,
+    qrDataUrl: qrChanged ? qrDataUrl : null,
+    qrVersion,
     expiresAt: status?.expiresAtMs ?? 0,
     viewer: viewer === null ? null : { userAgent: viewer.userAgent },
     audio: capture.get()?.audio ?? false,

@@ -13,7 +13,10 @@ export type HostState = {
   /** `http://farol.local:<port>/` when the mDNS responder is active; null keeps the UI honest. */
   mdnsUrl: string | null;
   pin: string;
-  qrDataUrl: string;
+  /** QR data URL. Null quando não mudou desde o último pushState — o renderer mantém o QR anterior. */
+  qrDataUrl: string | null;
+  /** Incrementa sempre que o QR é regenerado (novo endereço ou novo PIN). */
+  qrVersion: number;
   expiresAt: number;
   viewer: { userAgent: string } | null;
   audio: boolean;

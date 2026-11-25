@@ -92,6 +92,8 @@ export function createMirror(): Mirror {
   // Qualidade de constraints da track aplicada com sucesso; usada para reverter se
   // setParameters falhar após applyConstraints já ter mudado a captura.
   let lastAppliedQuality: Quality = "1080p";
+  // Válvula de escape: 1.0 = sem redução de resolução; > 1.0 reduz sob pressão do encoder.
+  let currentScaleResolutionDownBy = 1.0;
   let lastEncoderStats:
     | (RTCOutboundRtpStreamStats & {
         qualityLimitationReason?: string;
@@ -220,6 +222,7 @@ export function createMirror(): Mirror {
     sender: RTCRtpSender,
     maxBitrateBps: number,
     quality: Quality,
+    scaleResolutionDownBy = 1.0,
   ): Promise<void> {
     const params = sender.getParameters() as RtcSenderParams;
     if (!(params.encodings?.length)) {
@@ -231,7 +234,7 @@ export function createMirror(): Mirror {
       encoding.maxBitrate = undefined;
       encoding.maxFramerate = undefined;
     } else {
-      Object.assign(encoding, videoEncodingParams(maxBitrateBps));
+      Object.assign(encoding, videoEncodingParams(maxBitrateBps, scaleResolutionDownBy));
       // degradationPreference e scaleResolutionDownBy pertencem ao nível de cima
       // de params (o Chromium os ignora dentro de encodings[0]); removem de encodings[0].
       delete encoding.degradationPreference;
@@ -345,6 +348,37 @@ export function createMirror(): Mirror {
                   totalEncodeTime?: number;
                 };
                 lastEncoderStats = next;
+                // Válvula de escape: sob pressão de CPU do encoder, reduzir resolução
+                // para manter o fps; quando se recuperar, voltar a 1.0.
+                if (
+                  next.qualityLimitationReason === "cpu" &&
+                  currentScaleResolutionDownBy === 1.0
+                ) {
+                  currentScaleResolutionDownBy = 1.5;
+                  const escapeSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
+                  if (escapeSender !== undefined) {
+                    void applyVideoBitrateCap(
+                      escapeSender,
+                      TARGET_BITRATE_BPS,
+                      request.quality,
+                      currentScaleResolutionDownBy,
+                    );
+                  }
+                } else if (
+                  next.qualityLimitationReason === "none" &&
+                  currentScaleResolutionDownBy > 1.0
+                ) {
+                  currentScaleResolutionDownBy = 1.0;
+                  const escapeSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
+                  if (escapeSender !== undefined) {
+                    void applyVideoBitrateCap(
+                      escapeSender,
+                      TARGET_BITRATE_BPS,
+                      request.quality,
+                      currentScaleResolutionDownBy,
+                    );
+                  }
+                }
                 const frames = next.framesEncoded ?? 0;
                 const ts =
                   typeof next.timestamp === "number" ? next.timestamp : null;
@@ -366,7 +400,7 @@ export function createMirror(): Mirror {
           } catch {
             // stats são best-effort; uma conexão fechada rejeita getStats()
           }
-        }, 1000);
+        }, 3000);
       }
       const audio = capture.getAudioTracks()[0] ?? null;
       if (audio !== null) audioSender = peer.addTrack(audio, capture);

@@ -19,14 +19,18 @@ export type VideoEncodingParams = RTCRtpEncodingParameters & {
   scaleResolutionDownBy: number;
 };
 
-export function videoEncodingParams(maxBitrateBps: number): VideoEncodingParams {
+export function videoEncodingParams(
+  maxBitrateBps: number,
+  scaleResolutionDownBy = 1.0,
+): VideoEncodingParams {
   return {
     maxBitrate: maxBitrateBps,
     maxFramerate: 30,
     // "maintain-resolution": sob pressão, o Chromium reduz fps, não resolução (opção b).
     // scaleResolutionDownBy: 1.0 garante que a resolução nunca seja baixada como válvula de escape.
+    // Valores > 1.0 permitem redução de resolução sob pressão do encoder.
     degradationPreference: "maintain-resolution",
-    scaleResolutionDownBy: 1.0,
+    scaleResolutionDownBy,
   };
 }
 

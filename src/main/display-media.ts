@@ -1,6 +1,7 @@
-import { desktopCapturer, type Session } from "electron";
+import { type Session } from "electron";
 
 import { audioModeFor } from "../shared/audio.ts";
+import { listSourcesCached } from "./sources-cache.ts";
 
 /** The source and audio grant chosen by the host renderer for the next getDisplayMedia call. */
 export type CaptureSelection = { sourceId: string; audio: boolean };
@@ -37,10 +38,7 @@ export function installDisplayMediaHandler(
     if (selection === null) return callback(null);
 
     try {
-      const sources = await desktopCapturer.getSources({
-        types: ["screen", "window"],
-        thumbnailSize: { width: 0, height: 0 },
-      });
+      const sources = await listSourcesCached();
       const source = sources.find((entry) => entry.id === selection.sourceId);
       if (source === undefined) return callback(null);
       const audio = selection.audio ? audioModeFor(process.platform) : null;

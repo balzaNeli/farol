@@ -62,7 +62,7 @@ export function createPairing(options: PairingOptions = {}): Pairing {
   const now = options.now ?? Date.now;
   const pinTtlMs = options.pinTtlMs ?? 60_000;
   const lockoutMs = options.lockoutMs ?? 60_000;
-  const connectTtlMs = options.connectTtlMs ?? 30_000;
+  const connectTtlMs = options.connectTtlMs ?? 15_000;
   const maxFailures = options.maxFailures ?? 3;
 
   let pin = newPin();
@@ -88,8 +88,8 @@ export function createPairing(options: PairingOptions = {}): Pairing {
     if (lockedUntilMs !== 0 && at >= lockedUntilMs) {
       lockedUntilMs = 0;
       failures = 0;
-      // Limpa entradas de IP quando o lockout global se resolve (per SPEC)
-      ipFailures.clear();
+      // Não limpa ipFailures: o backoff por IP permanece independente
+      // após o lockout global expirar, evitando retry imediato do mesmo IP.
     }
     // Clean any session that past its connect deadline without connecting
     if (session !== null && !session.connected && at >= session.connectByMs) session = null;
