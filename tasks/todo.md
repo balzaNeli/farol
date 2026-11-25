@@ -123,7 +123,7 @@ Branch: `dev`. Commits com `--no-gpg-sign` para assinatura manual. Aprovação d
 Regras (CONSTRAINTS.md + EX-001): LAN oscilando = 1080p fixo e queda de fps aceita; só o motivo
 `"cpu"` no encoder do host autoriza `scaleResolutionDownBy = 1.5`, voltando a `1.0` em `"none"`;
 `iceServers` vazio; viewer receive-only; sem novas dependências runtime; cobertura dos módulos
-puros ≥ 95,88%; zero warnings no lint; sem `@ts-ignore`/`eslint-disable`.
+puros ≥ 99,71% (ratchet subido na Fase 2); zero warnings no lint; sem `@ts-ignore`/`eslint-disable`.
 
 ## Etapa 1 — Spec primeiro (doc-first)
 - [x] `docs/superpowers/specs/...-design.md` (Abordagem A, números e eixos independentes)
@@ -132,26 +132,39 @@ puros ≥ 95,88%; zero warnings no lint; sem `@ts-ignore`/`eslint-disable`.
 - [x] `tasks/todo.md` este ledger
 
 ## Etapa 2 — Funções puras (TDD)
-- [ ] RED: `tests/adaptive.test.ts` + novos casos em `tests/reconnect.test.ts` (@tdd-guide)
-- [ ] GREEN: `initialAdaptiveState()` + `nextAdaptive()` em `src/shared/capture.ts`
-- [ ] GREEN: `MAX_ICE_RESTARTS`, `canRestartIce()` e evento `checking` em
-      `src/viewer/connection.ts`
+- [x] RED: `tests/adaptive.test.ts` + novos casos em `tests/reconnect.test.ts` (@tdd-guide)
+- [x] GREEN: `initialAdaptiveState()` + `nextAdaptive()` em `src/shared/capture.ts`
+- [x] GREEN: `MAX_ICE_RESTARTS`/`canRestartIce()` em `src/shared/rtc.ts`, reexportados em
+      `src/viewer/connection.ts`, e evento `checking` no reducer
 
 ## Etapa 3 — Wiring no host (TDD)
-- [ ] RED: teste de reprodução da válvula EX-001 inerte em `tests/mirror.test.ts`
-- [ ] GREEN: `applyVideoBitrateCap()` escreve o `scale` no topo e em `encodings[0]`
-- [ ] RED/GREEN: timer de 3 s alimenta `nextAdaptive()` com `outbound-rtp` +
+- [x] RED: teste de reprodução da válvula EX-001 inerte em `tests/mirror.test.ts`
+- [x] GREEN: `applyVideoBitrateCap()` escreve o `scale` no topo e em `encodings[0]`
+- [x] RED/GREEN: timer de 3 s alimenta `nextAdaptive()` com `outbound-rtp` +
       `remote-inbound-rtp`, via fila serial `paramsChain`
-- [ ] RED/GREEN: orçamento de 2 ICE restarts no host
+- [x] RED/GREEN: orçamento de 2 ICE restarts no host
+- [x] Correções de revisão: epoch invalida degraus enfileirados, histerese só avança após
+      `setParameters` confirmar, restart pendente não gasta orçamento, `pendingOperation` é
+      invalidado no `release()`
 
 ## Etapa 4 — Viewer (TDD indireto + tipos)
-- [ ] `Watch.tsx`: `checking`, retry 1/2 com timer de 8 s por tentativa, status `(n/2)`
-- [ ] Sem APIs de captura, sem novo `Signal`, sem re-pair automático após `lost`
+- [x] `Watch.tsx`: `checking`, retry 1/2 com timer de 8 s por tentativa, status `(n/2)`
+- [x] `failureEvent(restartPending)` + evento `duplicate` no reducer: duplicata do outro handler
+      antes do `checking` não consome o segundo restart
+- [x] Sem APIs de captura, sem novo `Signal` de sinalização, sem re-pair automático após `lost`
 
 ## Etapa 5 — Gate, revisão e assinatura
-- [ ] `npx tsc -p tsconfig.json` limpo
-- [ ] `npm run verify` verde (lint, testes, cobertura ≥ 95,88%, build, gates)
-- [ ] `@code-reviewer` fresh-context sobre o diff da Fase 2
+- [x] `npx tsc -p tsconfig.json` limpo
+- [x] `npm run verify` verde (122 testes, cobertura 99,71%, lint/build/gates)
+- [x] `@code-reviewer` fresh-context: nenhum achado crítico/importante; 6 findings anteriores
+      verificados como corrigidos, 3 ajustes de sincronia de docs aplicados
+- [x] Revisões de React: duplicata e orçamento validados nas duas ordens de eventos; cleanup de
+      `firstMediaTimer`, `clearRetry()` nos caminhos terminais, guards de ciclo de vida e
+      `role="alert"` no texto (não no botão)
+- [x] `eslint-plugin-react-hooks` (dev) com `rules-of-hooks`/`exhaustive-deps` em `src/**`;
+      corrigiu deps reais do effect de teclado sem supressões
 - [ ] Pendência manual: medir na Fire TV oscilação de LAN (1080p fixo) e 2 restarts em
       `docs/manual-tests.md`
-- [ ] Commits com `--no-gpg-sign` deixados para assinatura manual
+- [x] Commits com `--no-gpg-sign` deixados para assinatura manual
+- Ressalva não bloqueante: live region de reconexão sempre montada exigiria classe
+      visually-hidden (o `.watch-reconnect` atual cobre o vídeo); fora do escopo desta fase.

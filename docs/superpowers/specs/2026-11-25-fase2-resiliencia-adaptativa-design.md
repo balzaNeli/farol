@@ -79,20 +79,26 @@ domínio.
   topo.
 - O timer de 3 s lê `outbound-rtp` (motivo, frames) e `remote-inbound-rtp` (`fractionLost`) de vídeo,
   monta o sample e chama `nextAdaptive`. Se `apply !== null`, aplica via uma fila serial
-  `paramsChain`, que também é usada por `setQuality()` e capturada pelo contador de geração.
+  `paramsChain`, que também é usada por `setQuality()`. A tarefa carrega a epoch capturada no
+  momento do sample: um reset de qualidade/stop invalida degraus enfileirados. A histerese só
+  avança depois que `setParameters()` confirma.
 - `setQuality()` e `release()` reiniciam o estado adaptativo; falha de `setParameters()` no timer
-  é best-effort (sem erro na UI a cada 3 s).
-- O contador de ICE restart do host vira número (0..2) usando `canRestartIce()`; no terceiro
-  `failed`, encerra com erro.
+  é best-effort (sem erro na UI a cada 3 s), mas não altera o estado interno.
+- O contador de ICE restart do host vira número (0..2) usando `canRestartIce()`; só conta quando a
+  oferta de restart realmente sai. Um restart pedido durante outra oferta fica pendente e é
+  disparado quando a sinalização estabiliza; no terceiro `failed` efetivo, encerra com erro.
 
 ## 6. Reconexão do viewer (`connection.ts` + `Watch.tsx`)
 
 - `MAX_ICE_RESTARTS = 2`, `canRestartIce(restarts)`, novo evento `"checking"` e campo opcional
   `rearmed`. `checking` só marca que o restart chegou ao handshake; **não** cancela o timeout.
 - `failed` concede um restart somente se houver orçamento e, quando já em `reconnecting`, o
-  evento `checking` tiver ocorrido. Duplicata do outro handler vai para `lost` sem gastar
-  orçamento. `connected` zera tudo; `timeout` em `reconnecting` vai para `lost`.
+  evento `checking` tiver ocorrido. A duplicata do outro handler é ignorada: não gasta orçamento
+  nem antecipa a tela de perda. `connected` zera tudo; `timeout` em `reconnecting` vai para `lost`.
 - Os testes atuais continuam válidos: sem `checking`, o segundo `failed` ainda termina em `lost`.
+  Para o duplicado real dos dois handlers, `Watch.tsx` usa `failureEvent(restartPending)` e o
+  reducer ignora o evento `duplicate` — o segundo restart continua disponível mesmo se o evento
+  chegar antes do `checking`.
 - `Watch.tsx` dispara `transition("checking")` em `iceConnectionState === "checking"`, chama
   `restartIce()` só quando o reducer aumentou `restarts`, rearma o timer de 8 s por tentativa e
   mostra `Reconnecting... (n/2)`. Nenhuma API de captura de mídia é introduzida.
@@ -106,7 +112,7 @@ rede, `applyConstraints` automático, `maintain-framerate-and-resolution`, 3+ re
 
 ## 8. Verificação
 
-TDD em cada item; cobertura dos módulos puros ≥ 95,88% (ratchet), zero warnings no lint,
+TDD em cada item; cobertura dos módulos puros ≥ 99,71% (ratchet), zero warnings no lint,
 `npx tsc -p tsconfig.json` limpo, `npm run verify` verde e commits com `--no-gpg-sign`.
 Medição manual na Fire TV fica registrada como pendente em `docs/manual-tests.md`: oscilação de
 LAN com 1080p fixo, dois restarts e terceira queda → tela de reconexão.

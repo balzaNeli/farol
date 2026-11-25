@@ -29,21 +29,35 @@ type FakeSender = {
   track: FakeTrack | null;
   getParameters: () => { encodings: Array<Record<string, unknown>> };
   setParameters: (p: unknown) => Promise<void>;
+  getStats: () => Promise<Map<string, Record<string, unknown>>>;
+  setStats: (report: Map<string, Record<string, unknown>>) => void;
 };
 
 function fakeSender(track: FakeTrack | null): FakeSender {
   let encodings: Array<Record<string, unknown>> = [];
+  let stats = new Map<string, Record<string, unknown>>();
   return {
     track,
-    getParameters: () => ({ encodings }),
+    // getParameters() devolve um snapshot no WebRTC real: mutations em params só viram estado
+    // quando setParameters() confirma. Devolver a referência viva esconderia falhas de apply.
+    getParameters: () => ({ encodings: encodings.map((entry) => ({ ...entry })) }),
     setParameters: async (p: unknown) => {
-      encodings = (p as { encodings: Array<Record<string, unknown>> }).encodings;
+      encodings = (p as { encodings: Array<Record<string, unknown>> }).encodings.map((entry) => ({
+        ...entry,
+      }));
+    },
+    getStats: async () => stats,
+    setStats: (report) => {
+      stats = report;
     },
   };
 }
 
 type FakePC = {
   connectionState: string;
+  signalingState: string;
+  localDescription: { sdp: string } | null;
+  restartCount: number;
   closed: boolean;
   getConfiguration: () => { iceServers: [] };
   addTrack: (t: FakeTrack) => FakeSender;
@@ -57,6 +71,7 @@ type FakePC = {
   onicecandidate: ((e: { candidate: { candidate: string; sdpMid: string; sdpMLineIndex: number; usernameFragment: string } | null }) => void) | null;
   onconnectionstatechange: (() => void) | null;
   oniceconnectionstatechange: (() => void) | null;
+  onsignalingstatechange: (() => void) | null;
 };
 
 function fakePC(): FakePC {
@@ -64,13 +79,16 @@ function fakePC(): FakePC {
   let closed = false;
   const senders: FakeSender[] = [];
   const transceivers: Array<{ sender: { track: FakeTrack | null } }> = [];
-  return {
+  const pc: FakePC = {
     get connectionState() {
       return connectionState;
     },
     set connectionState(v) {
       connectionState = v;
     },
+    signalingState: "stable",
+    localDescription: null,
+    restartCount: 0,
     get closed() {
       return closed;
     },
@@ -89,8 +107,12 @@ function fakePC(): FakePC {
     getTransceivers: () => transceivers,
     setCodecPreferences: () => undefined,
     createOffer: async () => ({ sdp: "v=0" }),
-    setLocalDescription: async (_d) => undefined,
-    restartIce: () => undefined,
+    setLocalDescription: async (d) => {
+      pc.localDescription = d;
+    },
+    restartIce: () => {
+      pc.restartCount += 1;
+    },
     close: () => {
       closed = true;
       connectionState = "closed";
@@ -98,7 +120,9 @@ function fakePC(): FakePC {
     onicecandidate: null,
     onconnectionstatechange: null,
     oniceconnectionstatechange: null,
+    onsignalingstatechange: null,
   };
+  return pc;
 }
 
 type FakeStream = {
@@ -121,6 +145,7 @@ function fakeStream(video: FakeTrack, audio: FakeTrack | null): FakeStream {
 // --- Mocks globais ---
 
 const createdPCs: FakePC[] = [];
+const intervalCallbacks: Array<() => unknown> = [];
 let getDisplayMediaImpl: (() => Promise<FakeStream>) | null = null;
 let mirrorStartImpl: ((req: unknown) => Promise<{ audio: boolean }>) | null = null;
 
@@ -146,7 +171,10 @@ function installBrowserMocks(): void {
         listSources: async () => [],
         capabilities: async () => ({ audio: true }),
       },
-      setInterval: () => 1,
+      setInterval: (fn: () => unknown) => {
+        intervalCallbacks.push(fn);
+        return intervalCallbacks.length;
+      },
       clearInterval: () => undefined,
     },
     writable: true,
@@ -190,6 +218,7 @@ function installBrowserMocks(): void {
 
 function resetMocks(): void {
   createdPCs.length = 0;
+  intervalCallbacks.length = 0;
   getDisplayMediaImpl = null;
   mirrorStartImpl = null;
 
@@ -218,6 +247,50 @@ function resetMocks(): void {
 
 async function importMirror() {
   return import("../src/renderer/mirror.ts");
+}
+
+async function fireStatsTicks(count: number): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    for (const callback of [...intervalCallbacks]) await callback();
+  }
+}
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function videoReport(
+  reason: string | null,
+  fractionLost: number | null,
+  sample: number,
+): Map<string, Record<string, unknown>> {
+  const report = new Map<string, Record<string, unknown>>();
+  report.set("out", {
+    type: "outbound-rtp",
+    kind: "video",
+    ssrc: 1,
+    qualityLimitationReason: reason ?? undefined,
+    framesEncoded: sample * 30,
+    timestamp: sample * 3000,
+  });
+  if (fractionLost !== null) {
+    report.set("in", {
+      type: "remote-inbound-rtp",
+      kind: "video",
+      ssrc: 1,
+      fractionLost,
+      timestamp: sample * 3000,
+    });
+  }
+  return report;
 }
 
 test("start(): falha após getDisplayMedia encerra todas as tracks", async (t) => {
@@ -463,6 +536,138 @@ test("start(): aviso de bitrate cap não é sobrescrito por error: null ao entra
   });
 });
 
+type CapturedParams = {
+  encodings: Array<Record<string, unknown>>;
+  degradationPreference?: string;
+  scaleResolutionDownBy?: number;
+};
+
+test("stats: CPU usa 1.5, rede nunca reduz resolução e bitrate segue a histerese", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+
+  const captured: { params: CapturedParams | null } = { params: null };
+  let capturedSender: FakeSender | null = null;
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+  const RealRTCPC = globalThis.RTCPeerConnection;
+  Object.defineProperty(globalThis, "RTCPeerConnection", {
+    value: class {
+      constructor() {
+        const pc = fakePC();
+        const sender = pc.addTrack(video);
+        const original = sender.setParameters.bind(sender);
+        sender.setParameters = async (p: unknown) => {
+          captured.params = p as CapturedParams;
+          await original(p);
+        };
+        capturedSender = sender;
+        return pc;
+      }
+    } as unknown,
+    writable: true,
+    configurable: true,
+  });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  const started = await mirror.start({ sourceId: "screen", quality: "1080p", audio: false });
+  assert.equal(started.ok, true);
+
+  assert.equal(captured.params?.degradationPreference, "maintain-resolution");
+  assert.equal(captured.params?.scaleResolutionDownBy, 1.0);
+  assert.equal(captured.params?.encodings[0]?.scaleResolutionDownBy, 1.0);
+  assert.equal(captured.params?.encodings[0]?.maxBitrate, 5_000_000);
+
+  capturedSender!.setStats(videoReport("cpu", null, 1));
+  await fireStatsTicks(1);
+  assert.equal(captured.params?.scaleResolutionDownBy, 1.5, "CPU valve must reach params top level");
+  assert.equal(
+    captured.params?.encodings[0]?.scaleResolutionDownBy,
+    1.5,
+    "CPU valve must reach encodings[0]",
+  );
+
+  capturedSender!.setStats(videoReport("bandwidth", 0.05, 2));
+  await fireStatsTicks(2);
+  assert.equal(captured.params?.scaleResolutionDownBy, 1.0, "LAN loss must never scale down");
+  assert.equal(captured.params?.encodings[0]?.scaleResolutionDownBy, 1.0);
+  assert.equal(captured.params?.encodings[0]?.maxBitrate, 4_000_000);
+  assert.equal(captured.params?.degradationPreference, "maintain-resolution");
+
+  capturedSender!.setStats(videoReport("none", 0.001, 3));
+  await fireStatsTicks(5);
+  assert.equal(captured.params?.encodings[0]?.maxBitrate, 4_400_000);
+  assert.equal(captured.params?.scaleResolutionDownBy, 1.0);
+
+  t.after(() => {
+    resetMocks();
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      value: RealRTCPC,
+      writable: true,
+      configurable: true,
+    });
+  });
+});
+
+test("start(): no máximo dois ICE restarts por episódio; connected zera o orçamento", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  let lastStatus = "";
+  mirror.onChange((state) => {
+    lastStatus = state.status;
+  });
+
+  const started = await mirror.start({ sourceId: "screen", quality: "1080p", audio: false });
+  assert.equal(started.ok, true);
+
+  const pc = createdPCs[0]!;
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 1);
+  assert.equal(lastStatus, "reconnecting");
+
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 2, "segundo restart consecutivo é permitido");
+
+  pc.connectionState = "connected";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(lastStatus, "live");
+
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 3, "connected zera o orçamento");
+
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 4, "o episódio após connected tem seu próprio orçamento");
+
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 4, "terceiro restart no mesmo episódio não pode acontecer");
+  assert.equal(lastStatus, "error");
+  assert.equal(pc.closed, true);
+  assert.equal(video.stopped, true);
+
+  t.after(() => resetMocks());
+});
+
 test("applyVideoBitrateCap: degradationPreference no nível de cima de params, não só em encodings[0]", async (t) => {
   installBrowserMocks();
 
@@ -507,4 +712,169 @@ test("applyVideoBitrateCap: degradationPreference no nível de cima de params, n
       configurable: true,
     });
   });
+});
+
+test("timer: falha de setParameters não avança a histerese", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+  const captured: { params: CapturedParams | null } = { params: null };
+  let failParams = false;
+  let sender: FakeSender | null = null;
+
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+  const RealRTCPC = globalThis.RTCPeerConnection;
+  Object.defineProperty(globalThis, "RTCPeerConnection", {
+    value: class {
+      constructor() {
+        const pc = fakePC();
+        const next = pc.addTrack(video);
+        const original = next.setParameters.bind(next);
+        next.setParameters = async (p: unknown) => {
+          if (failParams) throw new Error("sender closed");
+          await original(p);
+          captured.params = p as CapturedParams;
+        };
+        sender = next;
+        return pc;
+      }
+    } as unknown,
+    writable: true,
+    configurable: true,
+  });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  assert.equal((await mirror.start({ sourceId: "screen", quality: "1080p", audio: false })).ok, true);
+
+  failParams = true;
+  sender!.setStats(videoReport("bandwidth", 0.05, 1));
+  await fireStatsTicks(1);
+  sender!.setStats(videoReport("bandwidth", 0.05, 2));
+  await fireStatsTicks(1);
+  assert.equal(captured.params?.encodings[0]?.maxBitrate, 5_000_000, "o encoder não mudou");
+
+  failParams = false;
+  sender!.setStats(videoReport("none", 0.001, 3));
+  await fireStatsTicks(5);
+  assert.equal(
+    captured.params?.encodings[0]?.maxBitrate,
+    5_000_000,
+    "a decisão falha não pode virar estado interno: cinco boas amostras não devem aplicar 4,4 Mbps",
+  );
+
+  t.after(() => {
+    resetMocks();
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      value: RealRTCPC,
+      writable: true,
+      configurable: true,
+    });
+  });
+});
+
+test("fila de params: degrau anterior não sobrevive a uma troca de qualidade", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+  const captured: { params: CapturedParams | null } = { params: null };
+  const gate = deferred();
+  let blockNextParams = false;
+  let sender: FakeSender | null = null;
+
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+  const RealRTCPC = globalThis.RTCPeerConnection;
+  Object.defineProperty(globalThis, "RTCPeerConnection", {
+    value: class {
+      constructor() {
+        const pc = fakePC();
+        const next = pc.addTrack(video);
+        const original = next.setParameters.bind(next);
+        next.setParameters = async (p: unknown) => {
+          if (blockNextParams) {
+            blockNextParams = false;
+            await gate.promise;
+          }
+          await original(p);
+          captured.params = p as CapturedParams;
+        };
+        sender = next;
+        return pc;
+      }
+    } as unknown,
+    writable: true,
+    configurable: true,
+  });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  assert.equal((await mirror.start({ sourceId: "screen", quality: "1080p", audio: false })).ok, true);
+
+  // Primeira amostra ruim: ainda não aplica, mas deixa o streak do meio do caminho.
+  sender!.setStats(videoReport("bandwidth", 0.05, 1));
+  await fireStatsTicks(1);
+
+  // setQuality bloqueia dentro de setParameters; o timer enfileira o degrau atrás dele.
+  blockNextParams = true;
+  const changed = mirror.setQuality("720p");
+  await flush();
+
+  sender!.setStats(videoReport("bandwidth", 0.05, 2));
+  const tick = intervalCallbacks.at(-1)!();
+  await flush();
+  gate.resolve();
+  await tick;
+  assert.equal(await changed, true);
+  await flush();
+
+  assert.equal(
+    captured.params?.encodings[0]?.maxBitrate,
+    5_000_000,
+    "o degrau enfileirado antes do reset não pode ser aplicado à nova qualidade",
+  );
+
+  t.after(() => {
+    resetMocks();
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      value: RealRTCPC,
+      writable: true,
+      configurable: true,
+    });
+  });
+});
+
+test("restart ignorado com sinalização ocupada não consome o orçamento", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  assert.equal((await mirror.start({ sourceId: "screen", quality: "1080p", audio: false })).ok, true);
+
+  const pc = createdPCs[0]!;
+  pc.signalingState = "have-local-offer";
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 0, "oferta em voo não pode ser interrompida");
+
+  pc.signalingState = "stable";
+  pc.onsignalingstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 1, "o restart pendente deve sair quando a sinalização estabiliza");
+
+  pc.connectionState = "failed";
+  pc.onconnectionstatechange?.();
+  await flush();
+  assert.equal(pc.restartCount, 2, "o segundo restart continua disponível");
+
+  t.after(() => resetMocks());
 });

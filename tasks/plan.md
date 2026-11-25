@@ -98,12 +98,15 @@ but is not locked at 30 fps yet (tuning follow-up); no fps/`lost` numbers record
       a manual check on the Fire TV that Silk resolves `.local` — direct-IP fallback covers it.
 
 ### Phase 5 — Resiliência de rede e qualidade adaptativa (Fase 2 das otimizações)
-- [ ] Task 16: bitrate adaptativo no host e válvula EX-001 corrigida (`src/shared/capture.ts`,
-      `src/renderer/mirror.ts`, `tests/capture.test.ts`, `tests/mirror.test.ts`)
-- [ ] Task 17: segundo ICE restart no viewer e no host (`src/viewer/connection.ts`,
+- [x] Task 16: bitrate adaptativo no host e válvula EX-001 corrigida (`src/shared/capture.ts`,
+      `src/shared/rtc.ts`, `src/renderer/mirror.ts`, `tests/adaptive.test.ts`,
+      `tests/mirror.test.ts`)
+- [x] Task 17: segundo ICE restart no viewer e no host (`src/viewer/connection.ts`,
       `src/viewer/Watch.tsx`, `src/renderer/mirror.ts`, `tests/reconnect.test.ts`)
-- [ ] Checkpoint 5: `npm run verify` + `npx tsc -p tsconfig.json`, revisão fresh-context e
-      medição manual na Fire TV (oscilação de LAN mantém 1080p; 2 restarts; 3ª queda → PIN pad)
+- [x] Checkpoint 5: `npm run verify` + `npx tsc -p tsconfig.json`, revisão fresh-context
+      (correções e re-revisão registradas em `tasks/todo.md`)
+- [ ] Medição manual na Fire TV (oscilação de LAN mantém 1080p; 2 restarts; 3ª queda → PIN pad),
+      pendência explícita em `docs/manual-tests.md`
 
 ### Checkpoint: Complete
 - [ ] Every success criterion in `SPEC.md` verified, with Fire TV items logged in

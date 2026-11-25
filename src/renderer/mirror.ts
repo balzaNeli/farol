@@ -1,8 +1,16 @@
 import { preferH264 } from "../shared/codecs.ts";
-import { TARGET_BITRATE_BPS, videoConstraints, videoEncodingParams } from "../shared/capture.ts";
+import {
+  initialAdaptiveState,
+  nextAdaptive,
+  type AdaptiveState,
+  type EncoderScale,
+  TARGET_BITRATE_BPS,
+  videoConstraints,
+  videoEncodingParams,
+} from "../shared/capture.ts";
 import type { Quality, StartRequest } from "../shared/ipc.ts";
 import type { Signal } from "../shared/protocol.ts";
-import { RTC_CONFIG } from "../shared/rtc.ts";
+import { canRestartIce, RTC_CONFIG } from "../shared/rtc.ts";
 
 export type MirrorStatus = "idle" | "starting" | "waiting" | "live" | "reconnecting" | "error";
 
@@ -16,6 +24,9 @@ export type MirrorState = {
 export type MirrorResult =
   | { ok: true; stream: MediaStream; audio: boolean }
   | { ok: false; error: string };
+
+/** Resultado de `offer()`: apenas `sent` representa uma oferta (ou restart) realmente enviada. */
+type OfferOutcome = "sent" | "skipped" | "failed";
 
 /** RTCRtpSendParameters com campos que o Chromium lê no nível de cima de params. */
 type RtcSenderParams = RTCRtpSendParameters & {
@@ -86,14 +97,25 @@ export function createMirror(): Mirror {
   let viewerPresent = false;
   let offered = false;
   let offering = false;
+  // Um restart pedido durante outra oferta fica pendente; a epoch de restart não é gasta
+  // até que a oferta realmente saia (ver offer()).
+  let pendingRestart = false;
+  // Orçamento do host: no máximo dois ICE restarts por episódio (MAX_ICE_RESTARTS).
+  let iceRestarts = 0;
   let answered = false;
   let statsTimer: number | null = null;
   let lastSurfaceType: "screen" | "window" | null = null;
   // Qualidade de constraints da track aplicada com sucesso; usada para reverter se
   // setParameters falhar após applyConstraints já ter mudado a captura.
   let lastAppliedQuality: Quality = "1080p";
-  // Válvula de escape: 1.0 = sem redução de resolução; > 1.0 reduz sob pressão do encoder.
-  let currentScaleResolutionDownBy = 1.0;
+  // Decisão adaptativa pura: bitrate reage à rede, escala só reage à CPU (EX-001).
+  let adaptive: AdaptiveState = initialAdaptiveState();
+  // Uma troca manual de qualidade invalida degraus já enfileirados pelo timer: a fila serializa,
+  // mas não cancela trabalho pendente. Cada reset incrementa a epoch.
+  let adaptiveEpoch = 0;
+  // Serializa setParameters do timer com o de setQuality: getParameters/setParameters não são
+  // atômicos e uma intercalação poderia descartar um degrau de bitrate.
+  let paramsChain: Promise<void> = Promise.resolve();
   let lastEncoderStats:
     | (RTCOutboundRtpStreamStats & {
         qualityLimitationReason?: string;
@@ -127,6 +149,22 @@ export function createMirror(): Mirror {
   function emit(patch: Partial<MirrorState>): void {
     state = { ...state, ...patch };
     for (const listener of listeners) listener(state);
+  }
+
+  /** Enfileira uma alteração de params sem deixar rejeição presa na cadeia. */
+  function queueParams<T>(task: () => Promise<T>): Promise<T> {
+    const next = paramsChain.then(task);
+    paramsChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  /** Reinicia a sessão de decisão; degraus enfileirados com a epoch antiga são descartados. */
+  function resetAdaptive(): void {
+    adaptiveEpoch += 1;
+    adaptive = initialAdaptiveState();
   }
 
   function clearLowFpsWarning(): void {
@@ -185,10 +223,16 @@ export function createMirror(): Mirror {
     pc = null;
     offered = false;
     offering = false;
+    pendingRestart = false;
+    iceRestarts = 0;
     answered = false;
     // Zera estado do encoder e contadores de FPS: uma sessão seguinte não deve herdar
-    // medições da sessão anterior.
+    // medições da sessão anterior. pendingOperation também é invalidado para que um
+    // setQuality em voo não reporte sucesso depois do stop.
+    pendingOperation += 1;
     lastEncoderStats = null;
+    resetAdaptive();
+    lastAppliedQuality = "1080p";
     previousFramesEncoded = null;
     previousTimestamp = null;
     lowFpsConsecutive = 0;
@@ -214,15 +258,19 @@ export function createMirror(): Mirror {
   }
 
   /**
-   * Aplica o teto de bitrate fixo ao sender de vídeo. `native` deixa a fonte em paz:
+   * Aplica o teto de bitrate e a escala ao sender de vídeo. `native` deixa a fonte em paz:
    * não injeta maxFramerate nem maxBitrate via setParameters.
    * Trata params.encodings vazio (antes da negociação SDP) injetando um encoding vazio.
+   *
+   * `scaleResolutionDownBy` é escrito no topo de params (o que o Chromium lê) **e** em
+   * encodings[0] (o que a especificação define). Escrever só no topo com 1.0 fixo tornava a
+   * válvula EX-001 inerte; escrever só em encodings[0] não afetava o encoder no Chromium.
    */
   async function applyVideoBitrateCap(
     sender: RTCRtpSender,
     maxBitrateBps: number,
     quality: Quality,
-    scaleResolutionDownBy = 1.0,
+    scaleResolutionDownBy: EncoderScale = 1.0,
   ): Promise<void> {
     const params = sender.getParameters() as RtcSenderParams;
     if (!(params.encodings?.length)) {
@@ -233,43 +281,51 @@ export function createMirror(): Mirror {
       // native não impõe teto: remove limites aplicados anteriormente (1080p/720p)
       encoding.maxBitrate = undefined;
       encoding.maxFramerate = undefined;
+      delete encoding.scaleResolutionDownBy;
     } else {
       Object.assign(encoding, videoEncodingParams(maxBitrateBps, scaleResolutionDownBy));
-      // degradationPreference e scaleResolutionDownBy pertencem ao nível de cima
-      // de params (o Chromium os ignora dentro de encodings[0]); removem de encodings[0].
+      // degradationPreference pertence só ao nível de cima de params (o Chromium ignora o
+      // campo dentro de encodings[0]); scaleResolutionDownBy precisa existir nos dois.
       delete encoding.degradationPreference;
-      delete encoding.scaleResolutionDownBy;
     }
-    // degradationPreference e scaleResolutionDownBy ficam no nível de cima de params;
-    // o Chromium ignora o campo dentro de encodings[0].
     params.degradationPreference = "maintain-resolution";
-    params.scaleResolutionDownBy = 1.0;
+    params.scaleResolutionDownBy = quality === "native" ? 1.0 : scaleResolutionDownBy;
     await sender.setParameters(params);
   }
 
-  async function offer(restart = false): Promise<boolean> {
+  async function offer(restart = false): Promise<OfferOutcome> {
     const peer = pc;
-    if (peer === null || offering) return true;
-    if (!restart && (offered || answered)) return true;
-    if (peer.signalingState !== "stable") return true;
+    if (peer === null) return "failed";
+    if (offering || peer.signalingState !== "stable") {
+      if (restart) pendingRestart = true;
+      return "skipped";
+    }
+    if (!restart && (offered || answered)) return "skipped";
 
     offering = true;
     try {
       if (restart) peer.restartIce();
       const local = await peer.createOffer();
       await peer.setLocalDescription(local);
-      if (peer !== pc) return false;
+      if (peer !== pc) return "failed";
       offered = true;
       if (peer.localDescription !== null) {
         window.mirror.sendSignal({ type: "offer", sdp: peer.localDescription.sdp });
       }
+      // Conta o orçamento somente quando o restart chegou à sinalização. Um pedido ignorado
+      // enquanto outra oferta estava em voo não pode queimar uma das duas tentativas.
+      if (restart) iceRestarts += 1;
       emit({ status: restart ? "reconnecting" : "waiting", error: null });
-      return true;
+      return "sent";
     } catch (err) {
       if (peer === pc) fail(err instanceof Error ? err.message : String(err));
-      return false;
+      return "failed";
     } finally {
       offering = false;
+      if (pendingRestart && peer === pc && peer.signalingState === "stable") {
+        pendingRestart = false;
+        void offer(true);
+      }
     }
   }
 
@@ -300,7 +356,7 @@ export function createMirror(): Mirror {
       if (video === undefined) throw new Error("display capture returned no video track");
       // "detail" instrui o Chromium a manter qualidade visual, não derrubar
       // resolução nem fps, quando o encoder estiver pressionado. Complementa o
-      // teto de bitrate fixo (5 Mbps) sem reduzir a resolução (opção b).
+      // teto de bitrate adaptativo (1,5–5 Mbps) sem reduzir a resolução por rede (opção b).
       video.contentHint = "detail";
 
       // Detecta se a fonte capturada é uma janela específica (não a tela inteira) para o aviso
@@ -319,7 +375,7 @@ export function createMirror(): Mirror {
       if ((peer.getConfiguration().iceServers ?? []).length > 0) {
         throw new Error("iceServers must stay empty");
       }
-      let iceRestarted = false;
+      lastAppliedQuality = request.quality;
 
       peer.addTrack(video, capture);
       const videoSender = peer.getSenders().find((sender) => sender.track === video);
@@ -334,12 +390,17 @@ export function createMirror(): Mirror {
         }
 
         // Instrumentação do encoder: outbound-rtp expõe qualityLimitationReason, framesEncoded,
-        // totalEncodeTime. qualityLimitationReason === "cpu" aponta para encoder do Windows;
-        // "none" significa que o host não está limitado localmente. Últimas stats ficam
-        // disponíveis em lastEncoderStats para diagnóstico.
+        // totalEncodeTime; remote-inbound-rtp expõe fractionLost (perda vista pelo receptor).
+        // Nada disso trafega pela sinalização e nada disso é lido na Fire TV (o viewer não faz
+        // getStats() fora de ?debug=1). O timer de 3 s alimenta a decisão pura `nextAdaptive`:
+        // bitrate reage à rede, resolução só reage à CPU (EX-001).
         statsTimer = window.setInterval(async () => {
           try {
+            if (run !== generation) return;
             const report = await videoSender.getStats();
+            if (run !== generation) return;
+            let reason: string | null = null;
+            let fractionLost: number | null = null;
             report.forEach((entry) => {
               if (entry.type === "outbound-rtp" && entry.kind === "video") {
                 const next = entry as RTCOutboundRtpStreamStats & {
@@ -348,40 +409,9 @@ export function createMirror(): Mirror {
                   totalEncodeTime?: number;
                 };
                 lastEncoderStats = next;
-                // Válvula de escape: sob pressão de CPU do encoder, reduzir resolução
-                // para manter o fps; quando se recuperar, voltar a 1.0.
-                if (
-                  next.qualityLimitationReason === "cpu" &&
-                  currentScaleResolutionDownBy === 1.0
-                ) {
-                  currentScaleResolutionDownBy = 1.5;
-                  const escapeSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
-                  if (escapeSender !== undefined) {
-                    void applyVideoBitrateCap(
-                      escapeSender,
-                      TARGET_BITRATE_BPS,
-                      request.quality,
-                      currentScaleResolutionDownBy,
-                    );
-                  }
-                } else if (
-                  next.qualityLimitationReason === "none" &&
-                  currentScaleResolutionDownBy > 1.0
-                ) {
-                  currentScaleResolutionDownBy = 1.0;
-                  const escapeSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
-                  if (escapeSender !== undefined) {
-                    void applyVideoBitrateCap(
-                      escapeSender,
-                      TARGET_BITRATE_BPS,
-                      request.quality,
-                      currentScaleResolutionDownBy,
-                    );
-                  }
-                }
+                reason = next.qualityLimitationReason ?? null;
                 const frames = next.framesEncoded ?? 0;
-                const ts =
-                  typeof next.timestamp === "number" ? next.timestamp : null;
+                const ts = typeof next.timestamp === "number" ? next.timestamp : null;
                 if (
                   previousFramesEncoded !== null &&
                   previousTimestamp !== null &&
@@ -395,10 +425,38 @@ export function createMirror(): Mirror {
                 }
                 previousFramesEncoded = frames;
                 previousTimestamp = ts;
+              } else if (entry.type === "remote-inbound-rtp" && entry.kind === "video") {
+                const inbound = entry as { fractionLost?: number };
+                if (typeof inbound.fractionLost === "number") fractionLost = inbound.fractionLost;
               }
             });
+            const epoch = adaptiveEpoch;
+            const qualityAtSample = lastAppliedQuality;
+            const decision = nextAdaptive(
+              adaptive,
+              { qualityLimitationReason: reason, fractionLost },
+              qualityAtSample,
+            );
+            const apply = decision.apply;
+            if (apply === null) {
+              adaptive = decision.state;
+              return;
+            }
+            // Só confirma a histerese se o encoder aceitou o degrau. Um setParameters que
+            // rejeita não pode avançar o estado: o mesmo degrau deve ser tentado de novo.
+            const applied = await queueParams(async () => {
+              if (epoch !== adaptiveEpoch || run !== generation) return false;
+              await applyVideoBitrateCap(
+                videoSender,
+                apply.maxBitrateBps,
+                qualityAtSample,
+                apply.scaleResolutionDownBy,
+              );
+              return true;
+            });
+            if (applied) adaptive = decision.state;
           } catch {
-            // stats são best-effort; uma conexão fechada rejeita getStats()
+            // stats são best-effort; uma conexão fechada rejeita getStats()/setParameters()
           }
         }, 3000);
       }
@@ -423,19 +481,26 @@ export function createMirror(): Mirror {
       peer.onconnectionstatechange = () => {
         if (peer !== pc) return;
         if (peer.connectionState === "connected") {
-          iceRestarted = false;
+          iceRestarts = 0;
+          pendingRestart = false;
           emit({ status: "live", error: null });
         }
         if (peer.connectionState === "failed") {
-          if (iceRestarted) {
+          // The host is the offerer: up to two ICE restarts per episode, then give up. The
+          // viewer runs the same budget on its own failed state (MAX_ICE_RESTARTS).
+          if (!canRestartIce(iceRestarts)) {
             fail("Peer connection failed");
             return;
           }
-          // The host is the offerer: one ICE restart per failure, then give up. The viewer
-          // requests the matching restart on its own failed state.
-          iceRestarted = true;
           void offer(true);
         }
+      };
+      // Um restart pedido durante uma negociação em andamento espera a sinalização estabilizar
+      // em vez de gastar o orçamento sem enviar nada.
+      peer.onsignalingstatechange = () => {
+        if (peer !== pc || !pendingRestart || peer.signalingState !== "stable") return;
+        pendingRestart = false;
+        void offer(true);
       };
 
       pc = peer;
@@ -443,9 +508,11 @@ export function createMirror(): Mirror {
       audioTrack = audio;
 
       if (viewerPresent) {
-        const sent = await offer();
+        const outcome = await offer();
         if (run !== generation) return stopped();
-        if (!sent) return { ok: false, error: state.error ?? "could not send the offer" };
+        if (outcome === "failed") {
+          return { ok: false, error: state.error ?? "could not send the offer" };
+        }
       }
 
       lastAppliedQuality = request.quality;
@@ -488,19 +555,28 @@ export function createMirror(): Mirror {
     const constraints = videoConstraints(quality);
     const previous = lastAppliedQuality;
     const operation = ++pendingOperation;
+    const runAtCall = generation;
     try {
       // Empty constraints clear the cap; the capture may keep its current size until it changes.
       await videoTrack.applyConstraints(constraints ?? {});
       if (operation !== pendingOperation) return false;
-      // Reaplica o teto de bitrate fixo ao trocar a qualidade (o bitrate permanece 5 Mbps).
+      // Reaplica o teto na fila usada pelo timer e recomeça a histerese: uma troca manual de
+      // qualidade é uma nova sessão de decisão (a válvula CPU volta no próximo sample).
       const videoSender = pc?.getSenders().find((sender) => sender.track === videoTrack);
       if (videoSender !== undefined) {
         try {
-          await applyVideoBitrateCap(videoSender, TARGET_BITRATE_BPS, quality);
+          const applied = await queueParams(async () => {
+            if (operation !== pendingOperation || runAtCall !== generation) return false;
+            await applyVideoBitrateCap(videoSender, TARGET_BITRATE_BPS, quality);
+            return true;
+          });
+          if (!applied) return false;
         } catch (err) {
           // setParameters falhou após applyConstraints já ter mudado a track: reverta
           // as constraints para a qualidade anterior para que UI e captura não divirjam.
           await videoTrack.applyConstraints(videoConstraints(previous) ?? {}).catch(() => undefined);
+          lastAppliedQuality = previous;
+          resetAdaptive();
           const message = err instanceof Error ? err.message : String(err);
           emit({ error: `Could not change quality to ${quality}: ${message}` });
           return false;
@@ -508,6 +584,7 @@ export function createMirror(): Mirror {
       }
       if (operation !== pendingOperation) return false;
       lastAppliedQuality = quality;
+      resetAdaptive();
       emit({ error: null });
       if (quality === "720p") clearLowFpsWarning();
       return true;
