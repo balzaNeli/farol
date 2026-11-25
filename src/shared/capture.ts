@@ -105,6 +105,66 @@ export function nextAdaptive(
   return { state: next, apply: changed ? { maxBitrateBps, scaleResolutionDownBy } : null };
 }
 
+/** Contadores de envio já validados; `bytesSent: null` significa que o stats não trouxe o campo. */
+export type SendCounters = { framesEncoded: number; bytesSent: number | null; timestamp: number };
+
+export type SendSample = {
+  framesEncoded?: number;
+  bytesSent?: number;
+  timestamp?: number;
+  qualityLimitationReason?: string | null;
+};
+
+export type SendMetrics = {
+  fps: number | null;
+  bitrateBps: number | null;
+  limitReason: string | null;
+};
+
+/**
+ * Deriva fps e bitrate de duas leituras do outbound-rtp (timestamp em ms). Função pura: não
+ * arredonda, não aplica nada ao sender e nunca inventa uma taxa sem um delta positivo de tempo.
+ */
+export function readSendMetrics(
+  previous: SendCounters | null,
+  sample: SendSample,
+): { counters: SendCounters | null; metrics: SendMetrics } {
+  const reason = sample.qualityLimitationReason;
+  const limitReason = typeof reason === "string" ? reason : null;
+  const framesEncoded = sample.framesEncoded;
+  const timestamp = sample.timestamp;
+
+  if (
+    typeof framesEncoded !== "number" ||
+    !Number.isFinite(framesEncoded) ||
+    typeof timestamp !== "number" ||
+    !Number.isFinite(timestamp)
+  ) {
+    return { counters: null, metrics: { fps: null, bitrateBps: null, limitReason } };
+  }
+
+  const rawBytes = sample.bytesSent;
+  const bytesSent =
+    typeof rawBytes === "number" && Number.isFinite(rawBytes) ? rawBytes : null;
+  const counters: SendCounters = { framesEncoded, bytesSent, timestamp };
+
+  if (previous === null || timestamp <= previous.timestamp) {
+    return { counters, metrics: { fps: null, bitrateBps: null, limitReason } };
+  }
+
+  const seconds = (timestamp - previous.timestamp) / 1000;
+  const deltaFrames = framesEncoded - previous.framesEncoded;
+  const fps = deltaFrames >= 0 ? deltaFrames / seconds : null;
+
+  let bitrateBps: number | null = null;
+  if (bytesSent !== null && previous.bytesSent !== null) {
+    const deltaBytes = bytesSent - previous.bytesSent;
+    if (deltaBytes >= 0) bitrateBps = (deltaBytes * 8) / seconds;
+  }
+
+  return { counters, metrics: { fps, bitrateBps, limitReason } };
+}
+
 /** Detecta se a fonte capturada é uma janela específica (não a tela inteira). */
 export function isWindowSurface(displaySurface: string | null | undefined): boolean {
   return displaySurface === "window";

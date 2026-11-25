@@ -5,6 +5,7 @@ import {
   initialAdaptiveState,
   MIN_BITRATE_BPS,
   nextAdaptive,
+  readSendMetrics,
   TARGET_BITRATE_BPS,
   type AdaptiveSample,
   type AdaptiveState,
@@ -293,4 +294,50 @@ test("apply is null without a change and carries both fields when present", () =
     "maxBitrateBps",
     "scaleResolutionDownBy",
   ]);
+});
+
+test("readSendMetrics: primeira amostra não inventa taxas", () => {
+  const { counters, metrics } = readSendMetrics(null, {
+    framesEncoded: 30, bytesSent: 1_000, timestamp: 3000,
+  });
+  assert.deepEqual(metrics, { fps: null, bitrateBps: null, limitReason: null });
+  assert.deepEqual(counters, { framesEncoded: 30, bytesSent: 1_000, timestamp: 3000 });
+});
+
+test("readSendMetrics: delta gera fps e bitrate", () => {
+  const { metrics } = readSendMetrics(
+    { framesEncoded: 30, bytesSent: 1_000, timestamp: 3000 },
+    { framesEncoded: 60, bytesSent: 4_000, timestamp: 6000, qualityLimitationReason: "none" },
+  );
+  assert.equal(metrics.fps, 10);
+  assert.equal(metrics.bitrateBps, 8_000);
+  assert.equal(metrics.limitReason, "none");
+});
+
+test("readSendMetrics: sem bytesSent o fps continua", () => {
+  const { metrics } = readSendMetrics(
+    { framesEncoded: 30, bytesSent: null, timestamp: 3000 },
+    { framesEncoded: 90, timestamp: 6000 },
+  );
+  assert.equal(metrics.fps, 20);
+  assert.equal(metrics.bitrateBps, null);
+});
+
+test("readSendMetrics: timestamp regressivo e deltas negativos não produzem taxas", () => {
+  const old = { framesEncoded: 30, bytesSent: 1_000, timestamp: 3000 };
+  const regressive = readSendMetrics(old, { framesEncoded: 90, bytesSent: 4_000, timestamp: 2000 });
+  assert.equal(regressive.metrics.fps, null);
+  assert.equal(regressive.metrics.bitrateBps, null);
+  const negative = readSendMetrics(old, { framesEncoded: 10, bytesSent: 500, timestamp: 6000 });
+  assert.equal(negative.metrics.fps, null);
+  assert.equal(negative.metrics.bitrateBps, null);
+});
+
+test("readSendMetrics: valores não finitos limpam contadores e preservam o motivo", () => {
+  const { counters, metrics } = readSendMetrics(null, {
+    framesEncoded: Number.NaN, bytesSent: Number.POSITIVE_INFINITY, timestamp: 3000,
+    qualityLimitationReason: "cpu",
+  });
+  assert.equal(counters, null);
+  assert.deepEqual(metrics, { fps: null, bitrateBps: null, limitReason: "cpu" });
 });
