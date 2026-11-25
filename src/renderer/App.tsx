@@ -53,6 +53,8 @@ export function App() {
     error: null,
     audio: false,
     lowFpsWarning: null,
+    quality: "1080p",
+    metrics: null,
   });
   const [notice, setNotice] = useState<string | null>(null);
   const [windowModeNotice, setWindowModeNotice] = useState<string | null>(null);

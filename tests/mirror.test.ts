@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { MirrorState } from "../src/renderer/mirror.ts";
+
 // --- Mocks do ambiente de navegador (Rodar em Node, não há window real) ---
 
 type FakeTrack = {
@@ -271,6 +273,7 @@ function videoReport(
   reason: string | null,
   fractionLost: number | null,
   sample: number,
+  bytesSent?: number,
 ): Map<string, Record<string, unknown>> {
   const report = new Map<string, Record<string, unknown>>();
   report.set("out", {
@@ -280,6 +283,7 @@ function videoReport(
     qualityLimitationReason: reason ?? undefined,
     framesEncoded: sample * 30,
     timestamp: sample * 3000,
+    ...(bytesSent === undefined ? {} : { bytesSent }),
   });
   if (fractionLost !== null) {
     report.set("in", {
@@ -876,5 +880,82 @@ test("restart ignorado com sinalização ocupada não consome o orçamento", asy
   await flush();
   assert.equal(pc.restartCount, 2, "o segundo restart continua disponível");
 
+  t.after(() => resetMocks());
+});
+
+test("stats: expõe métricas ao onChange e zera no stop", async (t) => {
+  installBrowserMocks();
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+  let sender: FakeSender | null = null;
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+  const RealRTCPC = globalThis.RTCPeerConnection;
+  Object.defineProperty(globalThis, "RTCPeerConnection", {
+    value: class {
+      constructor() {
+        const pc = fakePC();
+        sender = pc.addTrack(video);
+        return pc;
+      }
+    } as unknown,
+    writable: true,
+    configurable: true,
+  });
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  const seen: Array<{ fps: number | null; bitrateBps: number | null }> = [];
+  let lastState: MirrorState = {
+    status: "idle",
+    error: null,
+    audio: false,
+    lowFpsWarning: null,
+    metrics: null,
+    quality: "1080p",
+  };
+  mirror.onChange((s) => {
+    lastState = s;
+    if (s.metrics !== null) seen.push(s.metrics);
+  });
+
+  const started = await mirror.start({ sourceId: "screen", quality: "1080p", audio: false });
+  assert.equal(started.ok, true);
+  assert.equal(seen.length, 0, "sem amostra não deve haver métrica");
+
+  sender!.setStats(videoReport("none", null, 1, 1_000));
+  await fireStatsTicks(1);
+  assert.equal(seen.at(-1)?.fps, null, "primeira amostra não tem delta");
+
+  sender!.setStats(videoReport("none", null, 2, 4_000));
+  await fireStatsTicks(1);
+  assert.ok((seen.at(-1)?.fps ?? 0) > 0);
+  assert.ok((seen.at(-1)?.bitrateBps ?? 0) > 0);
+
+  mirror.stop();
+  assert.equal(lastState.metrics, null, "stop deve limpar o snapshot");
+  assert.equal(lastState.quality, "1080p");
+
+  t.after(() => {
+    resetMocks();
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      value: RealRTCPC,
+      writable: true,
+      configurable: true,
+    });
+  });
+});
+
+test("onChange: unsubscribe interrompe as emissões", async (t) => {
+  installBrowserMocks();
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  let emissions = 0;
+  const off = mirror.onChange(() => {
+    emissions += 1;
+  });
+  const before = emissions;
+  off();
+  mirror.stop();
+  assert.equal(emissions, before, "nenhuma emissão depois do unsubscribe");
   t.after(() => resetMocks());
 });

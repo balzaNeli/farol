@@ -2,8 +2,12 @@ import { preferH264 } from "../shared/codecs.ts";
 import {
   initialAdaptiveState,
   nextAdaptive,
+  readSendMetrics,
   type AdaptiveState,
   type EncoderScale,
+  type SendCounters,
+  type SendMetrics,
+  type SendSample,
   TARGET_BITRATE_BPS,
   videoConstraints,
   videoEncodingParams,
@@ -19,6 +23,8 @@ export type MirrorState = {
   error: string | null;
   audio: boolean;
   lowFpsWarning: string | null;
+  metrics: SendMetrics | null;
+  quality: Quality;
 };
 
 export type MirrorResult =
@@ -46,7 +52,7 @@ export type Mirror = {
   setAudio: (on: boolean) => Promise<boolean>;
   setQuality: (quality: Quality) => Promise<boolean>;
   handleSignal: (signal: Signal) => void;
-  onChange: (listener: (state: MirrorState) => void) => void;
+  onChange: (listener: (state: MirrorState) => void) => () => void;
   getEncoderStats: () => {
     qualityLimitationReason: string | null;
     framesEncoded: number;
@@ -84,6 +90,8 @@ export function createMirror(): Mirror {
     error: null,
     audio: false,
     lowFpsWarning: null,
+    metrics: null,
+    quality: "1080p",
   };
   let generation = 0;
   // Contador de operações assíncronas em andamento (setAudio/setQuality). Após cada await,
@@ -133,8 +141,7 @@ export function createMirror(): Mirror {
   const LOW_FPS_SAMPLES_TO_TRIGGER = 5; // ~5 s de amostras de 1 s
   const GOOD_FPS_SAMPLES_TO_CLEAR = 3; // 3 amostras seguidas boas
 
-  let previousFramesEncoded: number | null = null;
-  let previousTimestamp: number | null = null;
+  let sendCounters: SendCounters | null = null;
   let lowFpsConsecutive = 0;
   let goodFpsConsecutive = 0;
   let lowFpsWarningEmitted = false;
@@ -233,10 +240,10 @@ export function createMirror(): Mirror {
     lastEncoderStats = null;
     resetAdaptive();
     lastAppliedQuality = "1080p";
-    previousFramesEncoded = null;
-    previousTimestamp = null;
+    sendCounters = null;
     lowFpsConsecutive = 0;
     goodFpsConsecutive = 0;
+    emit({ metrics: null, quality: "1080p" });
   }
 
   function fail(message: string): void {
@@ -401,35 +408,34 @@ export function createMirror(): Mirror {
             if (run !== generation) return;
             let reason: string | null = null;
             let fractionLost: number | null = null;
+            let sample: SendSample = {};
             report.forEach((entry) => {
               if (entry.type === "outbound-rtp" && entry.kind === "video") {
                 const next = entry as RTCOutboundRtpStreamStats & {
                   qualityLimitationReason?: string;
                   framesEncoded?: number;
+                  bytesSent?: number;
                   totalEncodeTime?: number;
                 };
                 lastEncoderStats = next;
                 reason = next.qualityLimitationReason ?? null;
-                const frames = next.framesEncoded ?? 0;
-                const ts = typeof next.timestamp === "number" ? next.timestamp : null;
-                if (
-                  previousFramesEncoded !== null &&
-                  previousTimestamp !== null &&
-                  ts !== null
-                ) {
-                  const deltaFrames = frames - previousFramesEncoded;
-                  const deltaSeconds = (ts - previousTimestamp) / 1000;
-                  if (deltaSeconds > 0) {
-                    evaluateLowFpsWarning(deltaFrames / deltaSeconds);
-                  }
-                }
-                previousFramesEncoded = frames;
-                previousTimestamp = ts;
+                sample = {
+                  framesEncoded: next.framesEncoded,
+                  bytesSent: next.bytesSent,
+                  timestamp: next.timestamp,
+                  qualityLimitationReason: reason,
+                };
               } else if (entry.type === "remote-inbound-rtp" && entry.kind === "video") {
                 const inbound = entry as { fractionLost?: number };
                 if (typeof inbound.fractionLost === "number") fractionLost = inbound.fractionLost;
               }
             });
+            // Uma única leitura por tick alimenta o painel e a histerese de FPS. O FPS vem do
+            // mesmo delta de quadros/tempo que antes era calculado aqui dentro do forEach.
+            const { counters, metrics } = readSendMetrics(sendCounters, sample);
+            sendCounters = counters;
+            emit({ metrics });
+            if (metrics.fps !== null) evaluateLowFpsWarning(metrics.fps);
             const epoch = adaptiveEpoch;
             const qualityAtSample = lastAppliedQuality;
             const decision = nextAdaptive(
@@ -517,7 +523,12 @@ export function createMirror(): Mirror {
 
       lastAppliedQuality = request.quality;
       // Preserva qualquer aviso não-crítico (ex.: bitrate cap) em vez de apagá-lo com error: null.
-      emit({ status: "waiting", error: state.error, audio: audio !== null });
+      emit({
+        status: "waiting",
+        error: state.error,
+        audio: audio !== null,
+        quality: request.quality,
+      });
       return { ok: true, stream: capture, audio: audio !== null };
     } catch (err) {
       if (run !== generation) return stopped();
@@ -578,14 +589,14 @@ export function createMirror(): Mirror {
           lastAppliedQuality = previous;
           resetAdaptive();
           const message = err instanceof Error ? err.message : String(err);
-          emit({ error: `Could not change quality to ${quality}: ${message}` });
+          emit({ error: `Could not change quality to ${quality}: ${message}`, quality: previous });
           return false;
         }
       }
       if (operation !== pendingOperation) return false;
       lastAppliedQuality = quality;
       resetAdaptive();
-      emit({ error: null });
+      emit({ error: null, quality });
       if (quality === "720p") clearLowFpsWarning();
       return true;
     } catch (err) {
@@ -625,6 +636,9 @@ export function createMirror(): Mirror {
     onChange: (listener) => {
       listeners.add(listener);
       listener(state);
+      return () => {
+        listeners.delete(listener);
+      };
     },
     getEncoderStats: () => {
       if (lastEncoderStats === null) return null;
