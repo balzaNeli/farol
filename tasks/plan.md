@@ -9,8 +9,8 @@ same server. 14 tasks across 4 phases, with 4 verification checkpoints. The Fire
 device we cannot test from here, so the plan puts a probe on real hardware before any viewer UI
 exists.
 
-Source of truth for behaviour: `SPEC.md` (rev 7, approved — transport decided by probe evidence,
-plus Fase 2 adaptive bitrate and two ICE restarts).
+Source of truth for behaviour: `SPEC.md` (rev 8, approved — transport decided by probe evidence,
+plus Fase 2 adaptive bitrate, two ICE restarts and the live host status line).
 
 ## Architecture decisions
 
@@ -107,6 +107,7 @@ but is not locked at 30 fps yet (tuning follow-up); no fps/`lost` numbers record
       (correções e re-revisão registradas em `tasks/todo.md`)
 - [ ] Medição manual na Fire TV (oscilação de LAN mantém 1080p; 2 restarts; 3ª queda → PIN pad),
       pendência explícita em `docs/manual-tests.md`
+- [ ] Task 18: Painel de status ao vivo no Host: `readSendMetrics` puro, `MirrorState.metrics`/`quality`, `LiveStatus` no `.status-area`, unsubscribe de `onChange`.
 
 ### Checkpoint: Complete
 - [ ] Every success criterion in `SPEC.md` verified, with Fire TV items logged in

@@ -501,3 +501,11 @@ attempt), with a `checking` event preventing duplicate `failed` handlers from co
 second restart. After the second failure the reconnect screen returns to the PIN pad; the
 single-use pairing token is never reused. Design:
 `docs/superpowers/specs/2026-11-25-fase2-resiliencia-adaptativa-design.md`.
+
+**Rev 8 (2026-11-25): painel de status ao vivo no Host** — linha compacta e somente leitura no
+`.status-area` do Host com estado da sessão, fps de envio, bitrate, qualidade aplicada, áudio e
+motivo de limitação do encoder. Os números vêm do `getStats()` de 3 s que o Host já executa, na
+mesma cadência, sem timer novo. Nenhum `Signal`, nenhum `getStats()` no viewer, nenhuma telemetria
+fora da LAN e nenhuma mudança de resolução (EX-001 intacta); `idle`, `error` e ausência de amostra
+mostram `—`, sem valor inventado. Critérios de sucesso, contratos e proibições permanecem os
+mesmos. Design: `docs/superpowers/specs/2026-11-25-painel-status-host-design.md`.

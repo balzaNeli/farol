@@ -168,3 +168,41 @@ puros ≥ 99,71% (ratchet subido na Fase 2); zero warnings no lint; sem `@ts-ign
 - [x] Commits com `--no-gpg-sign` deixados para assinatura manual
 - Ressalva não bloqueante: live region de reconexão sempre montada exigiria classe
       visually-hidden (o `.watch-reconnect` atual cobre o vídeo); fora do escopo desta fase.
+
+---
+
+# Acompanhamento da Fase 2 — painel de status ao vivo no Host (Task 18)
+
+Branch: `dev`. Commits com `--no-gpg-sign` para assinatura manual. Abordagem A e design aprovados
+pelo parceiro humano em 2026-11-25; design em
+`docs/superpowers/specs/2026-11-25-painel-status-host-design.md`, plano em
+`docs/superpowers/plans/2026-11-25-painel-status-host.md`.
+
+Regras (CONSTRAINTS.md + EX-001): o painel é somente leitura e local; os números vêm do `getStats()`
+de 3 s que o Host já executa, na mesma cadência, sem timer novo. Nenhum `Signal`, nenhum
+`getStats()` no viewer, nenhuma telemetria fora da LAN e nenhuma mudança de resolução (EX-001
+intacta). `idle`, `error` e sem amostra mostram `—`. Ratchet de cobertura **inalterado nesta
+tarefa** (99,71%); só sobe na Task 4 se a cobertura aumentar.
+
+Critérios de aceite: gate verde com ratchet atual, componente sem `role="status"` próprio, sem
+timer novo, revisões de código e React sem achados críticos.
+
+## Etapa 1 — Spec primeiro (doc-first)
+- [x] Design doc revisado uma última vez (abordagem A aprovada, sem reabrir decisão)
+- [x] `SPEC.md` rev 8 (linha de status do Host, fonte dos números e cadência de 3 s)
+- [x] `tasks/plan.md`: Task 18 na Fase 5, sem reabrir checkpoints fechados
+- [x] `tasks/todo.md`: este ledger com critérios de aceite
+
+## Etapa 2 — Implementação (Tasks 2–4 do plano JE)
+- [ ] `readSendMetrics` puro em `src/shared/capture.ts` + casos em `tests/adaptive.test.ts`
+- [ ] `MirrorState.metrics`/`quality`, emissão no timer de 3 s e unsubscribe de `onChange` + testes
+- [ ] `LiveStatus` dentro do `.status-area`, sem `role="status"` próprio, e CSS com tokens locais
+- [ ] Nenhum valor fabricado antes da primeira amostra; bitrate `—` sem tráfego real
+
+## Etapa 3 — Verificação e entrega
+- [ ] `npm run verify` verde com o ratchet atual (99,71%)
+- [ ] `npx tsc -p tsconfig.json` limpo e `git diff --check` sem whitespace errors
+- [ ] Revisões de código e React sem achados críticos
+- [ ] Commit `docs(fase2): especificar painel de status ao vivo no host` com `--no-gpg-sign`
+- [ ] Se a cobertura subir na Task 4, atualizar o ratchet em `package.json`, `CONSTRAINTS.md`,
+      neste ledger e no design doc (não nesta tarefa)
