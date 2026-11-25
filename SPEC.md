@@ -460,8 +460,8 @@ build with an unhandled `uncaughtException`; remove the VP8 fallback from the co
   waits for audio.
 - AP/client isolation or guest networks block peer-to-peer; symptom and diagnosis go in the README.
 - Windows Firewall prompt appears on first run; documented with a screenshot path.
-- Reconnect logic stops at one ICE restart on `failed`; if that fails the viewer shows a reconnect
-  screen and returns to the PIN pad, and re-pairs without reloading the page.
+- Reconnect logic allows two ICE restarts on `failed` (8 s timeout each); if both fail the viewer
+  shows a reconnect screen and returns to the PIN pad, and re-pairs without reloading the page.
 
 ---
 
@@ -486,3 +486,18 @@ never fails because of it, host UI shows the name first and the IP below, QR sta
 Design approved 2026-11-15 (5 vetos: QR by IP, TTL-0 goodbye, empty AAAA answer, pure codec inside
 the coverage ratchet, mDNS explicitly enabled at both entry points). Real-device check that Silk
 resolves `.local` still pending — direct-IP remains the fallback in every failure case.
+
+**Rev 7 (2026-11-25): Fase 2 — resiliência de rede e qualidade adaptativa.** Approach A approved:
+`maxBitrate` varies via `sender.setParameters()` (1,5–5 Mbps, two consecutive bad samples at
+>2% `fractionLost` or `bandwidth` to drop 20%, five good samples at <0,5% to rise 10%); the
+capture stays at 1080p and `degradationPreference` stays `maintain-resolution` on LAN oscillation,
+so only fps drops. `scaleResolutionDownBy` remains exclusively the EX-001 CPU valve (1,5 only
+while `qualityLimitationReason === "cpu"`, back to 1,0 on `none`), now actually written to the
+sender after the Fase 1 wiring discarded it. `nextAdaptive()` lives in `src/shared/capture.ts` as
+a pure reducer and is fed by the host's existing 3 s `getStats()` timer using
+`remote-inbound-rtp` — no viewer telemetry, no new `Signal`, no SDP renegotiation for bitrate.
+ICE restart budget rises from one to two per side (`MAX_ICE_RESTARTS = 2`, 8 s timeout per
+attempt), with a `checking` event preventing duplicate `failed` handlers from consuming the
+second restart. After the second failure the reconnect screen returns to the PIN pad; the
+single-use pairing token is never reused. Design:
+`docs/superpowers/specs/2026-11-25-fase2-resiliencia-adaptativa-design.md`.

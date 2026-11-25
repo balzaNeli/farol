@@ -9,7 +9,8 @@ same server. 14 tasks across 4 phases, with 4 verification checkpoints. The Fire
 device we cannot test from here, so the plan puts a probe on real hardware before any viewer UI
 exists.
 
-Source of truth for behaviour: `SPEC.md` (rev 5, approved — transport decided by probe evidence).
+Source of truth for behaviour: `SPEC.md` (rev 7, approved — transport decided by probe evidence,
+plus Fase 2 adaptive bitrate and two ICE restarts).
 
 ## Architecture decisions
 
@@ -95,6 +96,14 @@ but is not locked at 30 fps yet (tuning follow-up); no fps/`lost` numbers record
       `http://farol.local:<port>/` first with IP fallback below, README/SPEC notes (rev 6).
       Code, tests and docs done and reviewed (fresh-context review, fixes applied); still pending
       a manual check on the Fire TV that Silk resolves `.local` — direct-IP fallback covers it.
+
+### Phase 5 — Resiliência de rede e qualidade adaptativa (Fase 2 das otimizações)
+- [ ] Task 16: bitrate adaptativo no host e válvula EX-001 corrigida (`src/shared/capture.ts`,
+      `src/renderer/mirror.ts`, `tests/capture.test.ts`, `tests/mirror.test.ts`)
+- [ ] Task 17: segundo ICE restart no viewer e no host (`src/viewer/connection.ts`,
+      `src/viewer/Watch.tsx`, `src/renderer/mirror.ts`, `tests/reconnect.test.ts`)
+- [ ] Checkpoint 5: `npm run verify` + `npx tsc -p tsconfig.json`, revisão fresh-context e
+      medição manual na Fire TV (oscilação de LAN mantém 1080p; 2 restarts; 3ª queda → PIN pad)
 
 ### Checkpoint: Complete
 - [ ] Every success criterion in `SPEC.md` verified, with Fire TV items logged in
