@@ -229,7 +229,7 @@ Expected: FAIL — `metrics`/`quality` ausentes em `MirrorState` e `off()` não 
 
 - [ ] **Step 3: Implementar a integração em `mirror.ts`**
 
-- `MirrorState` ganha `metrics` e `quality`; o estado inicial usa `metrics: null, quality: "1080p"` (atualizar também o literal inicial em `App.tsx:51-56` é da Task 4, mas o tipo precisa estar certo aqui).
+- `MirrorState` ganha `metrics` e `quality`; o estado inicial usa `metrics: null, quality: "1080p"` (o literal inicial em `App.tsx:51-56` é atualizado nesta mesma tarefa, no item abaixo).
 - Substituir `previousFramesEncoded`/`previousTimestamp` por `sendCounters: SendCounters | null`. No timer, chamar `readSendMetrics(sendCounters, { framesEncoded, bytesSent, timestamp, qualityLimitationReason })` uma vez; guardar `sendCounters = counters`, `emit({ metrics })`, e usar `metrics.fps` (quando `!== null`) como entrada de `evaluateLowFpsWarning`. Manter `lastEncoderStats` e `nextAdaptive` intactos.
 - `release()` acrescenta `sendCounters = null`, `metrics: null` e `quality: "1080p"` no estado emitido; `statsTimer` já é limpado ali.
 - Atualizar o literal inicial de `useState<MirrorState>` em `App.tsx:51-56` com `quality: "1080p", metrics: null` — apenas esses dois campos, sem tocar no restante do componente nesta tarefa.
@@ -245,14 +245,14 @@ Expected: limpo. O literal de `App.tsx` já foi atualizado nesta tarefa, então 
 
 - [ ] **Step 5: Commitar**
 
-Run: `git add src/renderer/mirror.ts tests/mirror.test.ts`
+Run: `git add src/renderer/mirror.ts src/renderer/App.tsx tests/mirror.test.ts`
 Run: `git commit --no-gpg-sign -m "feat(fase2): publicar metricas do host e unsubscribe do onChange"`
 
 ### Task 4: Componente `LiveStatus` no status-area
 
 **Files:**
 - Create: `src/renderer/LiveStatus.tsx`
-- Modify: `src/renderer/App.tsx:1-56`, `:86-101`, `:276-301`
+- Modify: `src/renderer/App.tsx:86-101`, `:276-301` (o literal inicial de `:51-56` já foi atualizado na Task 3)
 - Modify: `src/renderer/host.css` (após `.status`, antes do bloco do preview)
 
 **Interfaces:**
