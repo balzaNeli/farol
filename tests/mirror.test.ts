@@ -456,6 +456,10 @@ test("setQuality(): falha de setParameters reverte constraints da track e retorn
 
   const { createMirror } = await importMirror();
   const mirror = createMirror();
+  let lastQuality: MirrorState["quality"] | null = null;
+  mirror.onChange((state) => {
+    lastQuality = state.quality;
+  });
 
   const started = await mirror.start({ sourceId: "screen", quality: "1080p", audio: false });
   assert.equal(started.ok, true, `start failed: ${(started as { error?: string }).error ?? "unknown"}`);
@@ -473,6 +477,7 @@ test("setQuality(): falha de setParameters reverte constraints da track e retorn
     /1920/,
     "track constraints reverted to 1080p (width 1920)",
   );
+  assert.equal(lastQuality, "1080p", "a qualidade publicada volta à anterior no revert");
 
   t.after(() => {
     resetMocks();
@@ -816,6 +821,10 @@ test("fila de params: degrau anterior não sobrevive a uma troca de qualidade", 
 
   const { createMirror } = await importMirror();
   const mirror = createMirror();
+  let lastQuality: MirrorState["quality"] | null = null;
+  mirror.onChange((state) => {
+    lastQuality = state.quality;
+  });
   assert.equal((await mirror.start({ sourceId: "screen", quality: "1080p", audio: false })).ok, true);
 
   // Primeira amostra ruim: ainda não aplica, mas deixa o streak do meio do caminho.
@@ -834,6 +843,7 @@ test("fila de params: degrau anterior não sobrevive a uma troca de qualidade", 
   await tick;
   assert.equal(await changed, true);
   await flush();
+  assert.equal(lastQuality, "720p", "a qualidade publicada acompanha o setQuality aplicado");
 
   assert.equal(
     captured.params?.encodings[0]?.maxBitrate,

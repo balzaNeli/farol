@@ -341,3 +341,25 @@ test("readSendMetrics: valores não finitos limpam contadores e preservam o moti
   assert.equal(counters, null);
   assert.deepEqual(metrics, { fps: null, bitrateBps: null, limitReason: "cpu" });
 });
+
+test("readSendMetrics: reason nulo e ausente viram limitReason nulo", () => {
+  const previous = { framesEncoded: 30, bytesSent: 1_000, timestamp: 3000 };
+  const explicit = readSendMetrics(previous, {
+    framesEncoded: 60, bytesSent: 2_000, timestamp: 6000, qualityLimitationReason: null,
+  });
+  const absent = readSendMetrics(previous, {
+    framesEncoded: 60, bytesSent: 2_000, timestamp: 6000,
+  });
+  assert.equal(explicit.metrics.limitReason, null);
+  assert.equal(absent.metrics.limitReason, null);
+});
+
+test("readSendMetrics: bytesSent não finito não invalida o fps", () => {
+  const { counters, metrics } = readSendMetrics(
+    { framesEncoded: 30, bytesSent: 1_000, timestamp: 3000 },
+    { framesEncoded: 60, bytesSent: Number.NaN, timestamp: 6000 },
+  );
+  assert.equal(metrics.fps, 10);
+  assert.equal(metrics.bitrateBps, null);
+  assert.equal(counters?.bytesSent, null);
+});

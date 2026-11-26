@@ -20,7 +20,8 @@
 - Resolução nunca é reduzida como válvula de rede. EX-001: `scaleResolutionDownBy` 1.5 somente com `qualityLimitationReason === "cpu"`, 1.0 em `"none"`; `degradationPreference` permanece `"maintain-resolution"`.
 - Nenhum novo `Signal`, campo IPC, `getStats()` no viewer, timer ou telemetria fora da LAN.
 - Sem `@ts-ignore`, `eslint-disable`, teste pulado/deletado, stub ou segredo no diff.
-- Cobertura dos módulos puros ≥ **99.71%** (ratchet; subir o piso se a cobertura aumentar); lint com zero warnings; `npx tsc -p tsconfig.json` limpo; `npm run verify` verde antes de cada commit.
+- Cobertura dos módulos puros ≥ **99.73%** (ratchet; subir o piso se a cobertura aumentar); lint
+  com zero warnings; `npx tsc -p tsconfig.json` limpo; `npm run verify` verde antes de cada commit.
 - Commits com `--no-gpg-sign`, `git add` e `git commit` em comandos separados, nada pushed.
 - Cadência honesta: o painel atualiza no máximo a cada **3 s**, a mesma do timer existente.
 
@@ -261,7 +262,13 @@ Run: `git commit --no-gpg-sign -m "feat(fase2): publicar metricas do host e unsu
 
 - [ ] **Step 1: Escrever o componente**
 
-`<dl className="live-status" aria-label="Live transmission status">` com cinco pares `dt`/`dd`: `Send`, `Bitrate`, `Quality`, `Audio`, `Encoder`. Formatação: `—` quando `metrics === null`, `status === "idle"` ou `status === "error"`; `fps` com `toFixed(0)` quando finito e `> 0`; `bitrateBps / 1_000_000` com `toFixed(1)` quando finito e `> 0`; `quality` (`native`/`1080p`/`720p`); `On`/`Off`; `limitReason` mapeado para `Stable` (`none`), `Network` (`bandwidth`), `CPU-limited` (`cpu`), senão `—`. Sem `role="status"` no `<dl>` e sem inline style.
+`<dl className="live-status" aria-label="Live transmission status">` com cinco pares `dt`/`dd`,
+cada par dentro de um `<div>` filho do `<dl>` (HTML5 válido): `Send`, `Bitrate`, `Quality`, `Audio`,
+`Encoder`. Formatação: `—` quando `metrics === null`, `status === "idle"` ou `status === "error"`;
+`fps` com `toFixed(0)` quando finito e `> 0`; `bitrateBps / 1_000_000` com `toFixed(1)` e vírgula
+decimal quando finito e `> 0`, com `<0,1 Mbps` se o texto formatado seria `0,0`; `quality`
+(`native`/`1080p`/`720p`); `On`/`Off`; `limitReason` mapeado para `Stable` (`none`), `Network`
+(`bandwidth`), `CPU-limited` (`cpu`), senão `—`. Sem `role="status"` no `<dl>` e sem inline style.
 
 - [ ] **Step 2: Ligar ao `App` e limpar o listener**
 
@@ -274,7 +281,8 @@ Acrescentar em `host.css`: `.live-status { display: grid; grid-template-columns:
 - [ ] **Step 4: Verificar e revisar**
 
 Run: `npx tsc -p tsconfig.json && npm run verify`
-Expected: limpo; cobertura ≥ 99,71% (se subir, atualizar ratchet em `package.json`, `CONSTRAINTS.md`, `tasks/todo.md` e no design doc antes do commit).
+Expected: limpo; cobertura ≥ 99,73% (se subir, atualizar ratchet em `package.json`, `CONSTRAINTS.md`,
+`tasks/todo.md` e no design doc antes do commit).
 Run: `git diff --check`
 Expected: sem whitespace errors.
 Revisar o diff com `@code-reviewer` e `@react-reviewer`; corrigir achados críticos/importantes antes do commit.

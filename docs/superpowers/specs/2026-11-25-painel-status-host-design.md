@@ -107,11 +107,16 @@ linha de status atual:
 />
 ```
 
-- Uma `<dl className="live-status">` com cinco células: `Send`, `Bitrate`, `Quality`, `Audio`,
-  `Encoder`. `dt` em caixa alta e pequeno; `dd` com `font-variant-numeric: tabular-nums`.
+- Uma `<dl className="live-status">` com cinco pares `dt`/`dd` agrupados, cada par dentro de um
+  `<div>` filho do `<dl>` (HTML5 válido): `Send`, `Bitrate`, `Quality`, `Audio`, `Encoder`. O
+  agrupamento mantém rótulo e valor na mesma célula quando o `auto-fit` quebra o grid em linhas.
+  `dt` em caixa alta e pequeno; `dd` com `font-variant-numeric: tabular-nums`.
 - Valores: `—` quando não há amostra ou sessão (`idle`, `error`), `30 fps`, `4,8 Mbps`, `1080p`,
   `On`/`Off`, e `Stable` / `Network` / `CPU-limited` conforme `limitReason` (`none` / `bandwidth`
   / `cpu`). Qualquer motivo desconhecido aparece como `—`, nunca como texto cru suspeito.
+- Bitrate positivo abaixo de ~50 kbps aparece como `<0,1 Mbps`: a vírgula decimal é mantida, mas
+  `toFixed(1)` arredondaria para `0,0` e leria como zero apesar de tráfego real. `—` continua
+  reservado a `null`, valores não finitos e `<= 0`.
 - Em `starting`/`waiting`, o FPS medido pode aparecer (a captura já está ativa); o bitrate só
   aparece com tráfego real. Nenhum valor é fabricado para preencher o painel.
 - Sem `role="status"` no `<dl>`: o `<p className="status" role="status">` existente continua sendo

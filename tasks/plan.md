@@ -5,7 +5,7 @@
 Mirror the host PC's screen + system audio to a Fire TV (Silk browser) and phones/tablets over
 the LAN, with no cloud, no install on the viewer and no traffic off the network. Built as an
 Electron host (capture + embedded HTTP/WS server + pairing) and a React viewer served from that
-same server. 14 tasks across 4 phases, with 4 verification checkpoints. The Fire TV is the
+same server. 18 tasks across 5 phases, with 4 verification checkpoints. The Fire TV is the
 device we cannot test from here, so the plan puts a probe on real hardware before any viewer UI
 exists.
 
@@ -107,7 +107,8 @@ but is not locked at 30 fps yet (tuning follow-up); no fps/`lost` numbers record
       (correções e re-revisão registradas em `tasks/todo.md`)
 - [ ] Medição manual na Fire TV (oscilação de LAN mantém 1080p; 2 restarts; 3ª queda → PIN pad),
       pendência explícita em `docs/manual-tests.md`
-- [ ] Task 18: Painel de status ao vivo no Host: `readSendMetrics` puro, `MirrorState.metrics`/`quality`, `LiveStatus` no `.status-area`, unsubscribe de `onChange`.
+- [x] Task 18: Painel de status ao vivo no Host: `readSendMetrics` puro,
+      `MirrorState.metrics`/`quality`, `LiveStatus` no `.status-area`, unsubscribe de `onChange`.
 
 ### Checkpoint: Complete
 - [ ] Every success criterion in `SPEC.md` verified, with Fire TV items logged in

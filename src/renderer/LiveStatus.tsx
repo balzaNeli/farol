@@ -28,23 +28,34 @@ export function LiveStatus({
   const bitrateBps = live?.bitrateBps ?? null;
   const fpsText =
     typeof fps === "number" && Number.isFinite(fps) && fps > 0 ? `${fps.toFixed(0)} fps` : EMPTY;
-  const bitrateText =
-    typeof bitrateBps === "number" && Number.isFinite(bitrateBps) && bitrateBps > 0
-      ? `${(bitrateBps / 1_000_000).toFixed(1).replace(".", ",")} Mbps`
-      : EMPTY;
+  let bitrateText = EMPTY;
+  if (typeof bitrateBps === "number" && Number.isFinite(bitrateBps) && bitrateBps > 0) {
+    const mbps = (bitrateBps / 1_000_000).toFixed(1).replace(".", ",");
+    bitrateText = mbps === "0,0" ? "<0,1 Mbps" : `${mbps} Mbps`;
+  }
 
   return (
     <dl className="live-status" aria-label="Live transmission status">
-      <dt>Send</dt>
-      <dd>{fpsText}</dd>
-      <dt>Bitrate</dt>
-      <dd>{bitrateText}</dd>
-      <dt>Quality</dt>
-      <dd>{live !== null ? quality : EMPTY}</dd>
-      <dt>Audio</dt>
-      <dd>{live !== null ? (audio ? "On" : "Off") : EMPTY}</dd>
-      <dt>Encoder</dt>
-      <dd>{live !== null ? encoderLabel(live.limitReason) : EMPTY}</dd>
+      <div>
+        <dt>Send</dt>
+        <dd>{fpsText}</dd>
+      </div>
+      <div>
+        <dt>Bitrate</dt>
+        <dd>{bitrateText}</dd>
+      </div>
+      <div>
+        <dt>Quality</dt>
+        <dd>{live !== null ? quality : EMPTY}</dd>
+      </div>
+      <div>
+        <dt>Audio</dt>
+        <dd>{live !== null ? (audio ? "On" : "Off") : EMPTY}</dd>
+      </div>
+      <div>
+        <dt>Encoder</dt>
+        <dd>{live !== null ? encoderLabel(live.limitReason) : EMPTY}</dd>
+      </div>
     </dl>
   );
 }

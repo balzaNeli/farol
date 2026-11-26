@@ -194,14 +194,14 @@ timer novo, revisões de código e React sem achados críticos.
 - [x] `tasks/todo.md`: este ledger com critérios de aceite
 
 ## Etapa 2 — Implementação (Tasks 2–4 do plano JE)
-- [ ] `readSendMetrics` puro em `src/shared/capture.ts` + casos em `tests/adaptive.test.ts`
-- [ ] `MirrorState.metrics`/`quality`, emissão no timer de 3 s e unsubscribe de `onChange` + testes
-- [ ] `LiveStatus` dentro do `.status-area`, sem `role="status"` próprio, e CSS com tokens locais
-- [ ] Nenhum valor fabricado antes da primeira amostra; bitrate `—` sem tráfego real
+- [x] `readSendMetrics` puro em `src/shared/capture.ts` + casos em `tests/adaptive.test.ts`
+- [x] `MirrorState.metrics`/`quality`, emissão no timer de 3 s e unsubscribe de `onChange` + testes
+- [x] `LiveStatus` dentro do `.status-area`, sem `role="status"` próprio, e CSS com tokens locais
+- [x] Nenhum valor fabricado antes da primeira amostra; bitrate `—` sem tráfego real
 
 ## Etapa 3 — Verificação e entrega
-- [ ] `npm run verify` verde com o ratchet atual (99,73%)
-- [ ] `npx tsc -p tsconfig.json` limpo e `git diff --check` sem whitespace errors
-- [ ] Revisões de código e React sem achados críticos
-- [ ] Commit `docs(fase2): especificar painel de status ao vivo no host` com `--no-gpg-sign`
+- [x] `npm run verify` verde com o ratchet atual (99,73%)
+- [x] `npx tsc -p tsconfig.json` limpo e `git diff --check` sem whitespace errors
+- [x] Revisões de código e React sem achados críticos
+- [x] Commit `docs(fase2): especificar painel de status ao vivo no host` com `--no-gpg-sign`
 - [x] Ratchet subido em `package.json`, `CONSTRAINTS.md`, neste ledger e no design doc na Task 4
