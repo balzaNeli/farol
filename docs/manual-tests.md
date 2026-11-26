@@ -345,9 +345,10 @@ iOS autoplay path in this table remain open for the final acceptance.
 
 ## Fase 2 — resiliência e adaptatividade (2026-11-25)
 
-Automated evidence: `tests/adaptive.test.ts` (histerese, piso/teto, CPU-only scale),
-`tests/reconnect.test.ts` (two restarts, `checking`, timeout) and `tests/mirror.test.ts` (the EX-001
-valve now reaches both `params` and `encodings[0]`, bad/good samples move `maxBitrate`, and the host
+Automated evidence: `tests/adaptive.test.ts` (histerese, piso/teto, CPU-only scale, duas amostras
+`cpu` consecutivas para entrar em 1.5 e cooldown de 3 ticks), `tests/reconnect.test.ts` (two
+restarts, `checking`, timeout) and `tests/mirror.test.ts` (the EX-001 valve reaches both `params`
+and `encodings[0]` without flapping between ticks, bad/good samples move `maxBitrate`, and the host
 stops after two restarts per episode). No new Signal type and no viewer telemetry.
 
 **Pending on `AFTCA002`:**
@@ -355,7 +356,7 @@ stops after two restarts per episode). No new Signal type and no viewer telemetr
 | # | Check | Result |
 |---|---|---|
 | 1 | Oscilação de LAN (perda > 2% por duas amostras de 3 s) reduz o bitrate de 5 para 4 Mbps e mantém 1920x1080 no viewer `?debug=1`; fps pode cair | |
-| 2 | `qualityLimitationReason === "cpu"` no host eleva `scaleResolutionDownBy` a 1.5 no sender; voltar a `"none"` restaura 1.0 sem renegociar SDP | |
+| 2 | `qualityLimitationReason === "cpu"` por duas amostras consecutivas de 3 s eleva `scaleResolutionDownBy` a 1.5 no sender; voltar a `"none"` restaura 1.0 na mesma amostra sem renegociar SDP; `cpu` isolado durante o cooldown de 3 ticks não reativa a válvula | |
 | 3 | Queda de Wi-Fi simulada: host e viewer fazem no máximo 2 ICE restarts cada um, com timeout de 8 s por tentativa e status `(n/2)` | |
 | 4 | Terceira queda no mesmo episódio mostra "The connection was lost."; "Pair again" volta ao PIN pad sem reload e sem reusar o token | |
 
