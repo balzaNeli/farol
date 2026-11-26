@@ -1,6 +1,7 @@
 import { preferH264 } from "../shared/codecs.ts";
 import {
   initialAdaptiveState,
+  isWindowSurface,
   nextAdaptive,
   readSendMetrics,
   type AdaptiveState,
@@ -368,7 +369,7 @@ export function createMirror(): Mirror {
 
       // Detecta se a fonte capturada é uma janela específica (não a tela inteira) para o aviso
       // de ~17 fps no Windows (Wayland/HWND path do Chromium limita janelas específicas).
-      lastSurfaceType = video.getSettings().displaySurface === "window" ? "window" : "screen";
+      lastSurfaceType = isWindowSurface(video.getSettings().displaySurface) ? "window" : "screen";
 
       const constraints = videoConstraints(request.quality);
       if (constraints !== null) await video.applyConstraints(constraints);

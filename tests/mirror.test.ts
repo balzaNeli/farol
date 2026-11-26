@@ -590,7 +590,11 @@ test("stats: CPU usa 1.5, rede nunca reduz resolução e bitrate segue a histere
   assert.equal(captured.params?.encodings[0]?.scaleResolutionDownBy, 1.0);
   assert.equal(captured.params?.encodings[0]?.maxBitrate, 5_000_000);
 
+  // A válvula EX-001 agora exige duas amostras cpu consecutivas: uma isolada não pode
+  // reconfigurar o encoder. Os samples crescem para manter os timestamps monotônicos.
   capturedSender!.setStats(videoReport("cpu", null, 1));
+  await fireStatsTicks(1);
+  capturedSender!.setStats(videoReport("cpu", null, 2));
   await fireStatsTicks(1);
   assert.equal(captured.params?.scaleResolutionDownBy, 1.5, "CPU valve must reach params top level");
   assert.equal(
@@ -599,14 +603,14 @@ test("stats: CPU usa 1.5, rede nunca reduz resolução e bitrate segue a histere
     "CPU valve must reach encodings[0]",
   );
 
-  capturedSender!.setStats(videoReport("bandwidth", 0.05, 2));
+  capturedSender!.setStats(videoReport("bandwidth", 0.05, 3));
   await fireStatsTicks(2);
   assert.equal(captured.params?.scaleResolutionDownBy, 1.0, "LAN loss must never scale down");
   assert.equal(captured.params?.encodings[0]?.scaleResolutionDownBy, 1.0);
   assert.equal(captured.params?.encodings[0]?.maxBitrate, 4_000_000);
   assert.equal(captured.params?.degradationPreference, "maintain-resolution");
 
-  capturedSender!.setStats(videoReport("none", 0.001, 3));
+  capturedSender!.setStats(videoReport("none", 0.001, 4));
   await fireStatsTicks(5);
   assert.equal(captured.params?.encodings[0]?.maxBitrate, 4_400_000);
   assert.equal(captured.params?.scaleResolutionDownBy, 1.0);
@@ -619,6 +623,109 @@ test("stats: CPU usa 1.5, rede nunca reduz resolução e bitrate segue a histere
       configurable: true,
     });
   });
+});
+
+test("stats: cpu → none → cpu → cpu não faz flap de escala no setParameters", async (t) => {
+  installBrowserMocks();
+
+  const video = fakeTrack("video");
+  const stream = fakeStream(video, null);
+  const written: CapturedParams[] = [];
+  let sender: FakeSender | null = null;
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+  const RealRTCPC = globalThis.RTCPeerConnection;
+  Object.defineProperty(globalThis, "RTCPeerConnection", {
+    value: class {
+      constructor() {
+        const pc = fakePC();
+        const next = pc.addTrack(video);
+        const original = next.setParameters.bind(next);
+        next.setParameters = async (p: unknown) => {
+          written.push(p as CapturedParams);
+          await original(p);
+        };
+        sender = next;
+        return pc;
+      }
+    } as unknown,
+    writable: true,
+    configurable: true,
+  });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  assert.equal((await mirror.start({ sourceId: "screen", quality: "1080p", audio: false })).ok, true);
+
+  // Só conta trocas de escala efetivas: o start escreve 1.0 e não é um flap.
+  const scaleChanges = (): number[] => {
+    const changes: number[] = [];
+    let previous: number | undefined = 1.0;
+    for (const params of written) {
+      const scale = params.scaleResolutionDownBy;
+      if (scale !== undefined && scale !== previous) {
+        changes.push(scale);
+        previous = scale;
+      }
+    }
+    return changes;
+  };
+
+  // Abre a válvula com duas amostras cpu (primeira escrita de escala).
+  sender!.setStats(videoReport("cpu", null, 1));
+  await fireStatsTicks(1);
+  sender!.setStats(videoReport("cpu", null, 2));
+  await fireStatsTicks(1);
+  assert.deepEqual(scaleChanges(), [1.5]);
+
+  // none recupera 1.0 (segunda escrita) e inicia o cooldown: as duas cpu seguintes
+  // não podem re-engajar o encoder, mesmo com streak suficiente.
+  sender!.setStats(videoReport("cpu", null, 3));
+  await fireStatsTicks(1);
+  sender!.setStats(videoReport("none", null, 4));
+  await fireStatsTicks(1);
+  sender!.setStats(videoReport("cpu", null, 5));
+  await fireStatsTicks(1);
+  sender!.setStats(videoReport("cpu", null, 6));
+  await fireStatsTicks(1);
+
+  const changes = scaleChanges();
+  assert.ok(changes.length <= 2, `no máximo duas escritas de escala, vieram ${changes.length}`);
+  assert.deepEqual(changes, [1.5, 1.0], "sem re-engajamento durante o cooldown");
+  assert.equal(written.at(-1)?.scaleResolutionDownBy, 1.0);
+  assert.equal(written.at(-1)?.encodings[0]?.scaleResolutionDownBy, 1.0);
+  assert.equal(written.at(-1)?.degradationPreference, "maintain-resolution");
+
+  t.after(() => {
+    resetMocks();
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      value: RealRTCPC,
+      writable: true,
+      configurable: true,
+    });
+  });
+});
+
+test("getSurfaceType(): displaySurface window detecta captura de janela", async (t) => {
+  installBrowserMocks();
+
+  const video = {
+    ...fakeTrack("video"),
+    getSettings: () => ({ displaySurface: "window" }),
+  };
+  const stream = fakeStream(video, null);
+  getDisplayMediaImpl = async () => stream;
+  mirrorStartImpl = async () => ({ audio: false });
+
+  const { createMirror } = await importMirror();
+  const mirror = createMirror();
+  assert.equal(mirror.getSurfaceType(), null, "sem captura não há superfície");
+
+  const started = await mirror.start({ sourceId: "window", quality: "1080p", audio: false });
+  assert.equal(started.ok, true);
+  assert.equal(mirror.getSurfaceType(), "window");
+
+  t.after(() => resetMocks());
 });
 
 test("start(): no máximo dois ICE restarts por episódio; connected zera o orçamento", async (t) => {
