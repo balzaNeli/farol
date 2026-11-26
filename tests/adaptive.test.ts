@@ -16,6 +16,7 @@ type Quality = Parameters<typeof nextAdaptive>[2];
 const BAD_LOSS: AdaptiveSample = { fractionLost: 0.05 };
 const GOOD: AdaptiveSample = { qualityLimitationReason: "none", fractionLost: 0.001 };
 const NO_EVIDENCE: AdaptiveSample = {};
+const CPU: AdaptiveSample = { qualityLimitationReason: "cpu" };
 
 function step(
   state: AdaptiveState,
@@ -38,6 +39,8 @@ test("initial adaptive state starts at the target bitrate with full resolution",
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 0,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   });
 });
 
@@ -57,11 +60,33 @@ test("native quality ignores every sample and returns the same state object", ()
     assert.strictEqual(result.state, state);
     assert.strictEqual(result.apply, null);
   }
+
+  // native não pode nem decrementar o cooldown: o objeto volta intacto.
+  const cooling: AdaptiveState = {
+    maxBitrateBps: 5_000_000,
+    scaleResolutionDownBy: 1.5,
+    downStreak: 0,
+    upStreak: 0,
+    cpuStreak: 2,
+    cpuCooldownTicks: 3,
+  };
+  for (const sample of [...samples, CPU]) {
+    const result = nextAdaptive(cooling, sample, "native");
+    assert.strictEqual(result.state, cooling);
+    assert.strictEqual(result.apply, null);
+  }
 });
 
 test("CPU pressure scales resolution down and clears as soon as the reason changes", () => {
+  // Antes bastava uma amostra cpu para abrir a válvula. Com histerese, a primeira amostra
+  // apenas conta o streak: reconfigurar o encoder com um único tick causava o flap EX-001.
   const initial = initialAdaptiveState();
-  const cpu = nextAdaptive(initial, { qualityLimitationReason: "cpu" }, "720p");
+  const firstCpu = nextAdaptive(initial, CPU, "720p");
+  assert.strictEqual(firstCpu.apply, null);
+  assert.equal(firstCpu.state.scaleResolutionDownBy, 1.0);
+  assert.equal(firstCpu.state.cpuStreak, 1);
+
+  const cpu = nextAdaptive(firstCpu.state, CPU, "720p");
   assert.deepEqual(cpu.apply, {
     maxBitrateBps: 5_000_000,
     scaleResolutionDownBy: 1.5,
@@ -71,6 +96,8 @@ test("CPU pressure scales resolution down and clears as soon as the reason chang
     scaleResolutionDownBy: 1.5,
     downStreak: 0,
     upStreak: 0,
+    cpuStreak: 2,
+    cpuCooldownTicks: 0,
   });
 
   const noneDirect = nextAdaptive(cpu.state, GOOD, "720p");
@@ -79,6 +106,8 @@ test("CPU pressure scales resolution down and clears as soon as the reason chang
     scaleResolutionDownBy: 1.0,
   });
   assert.equal(noneDirect.state.scaleResolutionDownBy, 1.0);
+  assert.equal(noneDirect.state.cpuStreak, 0);
+  assert.equal(noneDirect.state.cpuCooldownTicks, 3);
 
   const bandwidth = nextAdaptive(cpu.state, { qualityLimitationReason: "bandwidth" }, "720p");
   assert.deepEqual(bandwidth.apply, {
@@ -87,6 +116,8 @@ test("CPU pressure scales resolution down and clears as soon as the reason chang
   });
   assert.equal(bandwidth.state.scaleResolutionDownBy, 1.0);
   assert.equal(bandwidth.state.downStreak, 1);
+  assert.equal(bandwidth.state.cpuStreak, 0);
+  assert.equal(bandwidth.state.cpuCooldownTicks, 3);
 
   const none = nextAdaptive(bandwidth.state, GOOD, "720p");
   assert.strictEqual(none.apply, null);
@@ -95,7 +126,52 @@ test("CPU pressure scales resolution down and clears as soon as the reason chang
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 1,
+    cpuStreak: 0,
+    cpuCooldownTicks: 2,
   });
+});
+
+test("CPU cooldown blocks re-engagement until three ticks have elapsed", () => {
+  let state = step(step(initialAdaptiveState(), CPU), CPU); // t1/t2: streak 2 → 1.5
+  assert.equal(state.scaleResolutionDownBy, 1.5);
+
+  state = step(state, GOOD); // t3: none devolve 1.0 na mesma amostra e inicia o cooldown
+  assert.equal(state.scaleResolutionDownBy, 1.0);
+  assert.equal(state.cpuCooldownTicks, 3);
+
+  for (const expectedCooldown of [2, 1]) {
+    const result = nextAdaptive(state, CPU, "720p");
+    assert.strictEqual(result.apply, null, "cpu dentro do cooldown não reconfigura o encoder");
+    assert.equal(result.state.scaleResolutionDownBy, 1.0);
+    assert.equal(result.state.cpuCooldownTicks, expectedCooldown);
+    state = result.state;
+  }
+  assert.equal(state.cpuStreak, 2);
+
+  const reengaged = nextAdaptive(state, CPU, "720p"); // t6: cooldown 0, streak 3
+  assert.deepEqual(reengaged.apply, {
+    maxBitrateBps: 5_000_000,
+    scaleResolutionDownBy: 1.5,
+  });
+  assert.equal(reengaged.state.cpuStreak, 3);
+  assert.equal(reengaged.state.cpuCooldownTicks, 0);
+});
+
+test("bandwidth and unknown samples reset the CPU streak", () => {
+  const warming = step(initialAdaptiveState(), CPU);
+  assert.equal(warming.cpuStreak, 1);
+
+  for (const sample of [
+    { qualityLimitationReason: "bandwidth" },
+    { qualityLimitationReason: "unknown" },
+    NO_EVIDENCE,
+  ]) {
+    const reset = nextAdaptive(warming, sample, "720p");
+    assert.equal(reset.state.cpuStreak, 0);
+    assert.equal(reset.state.scaleResolutionDownBy, 1.0);
+    // O streak zerado impede que uma única amostra cpu seguinte abra a válvula.
+    assert.strictEqual(nextAdaptive(reset.state, CPU, "720p").apply, null);
+  }
 });
 
 test("only CPU scales resolution down; every other reason fails closed to 1.0", () => {
@@ -125,6 +201,8 @@ test("two consecutive bad samples drop the bitrate by 20% and reset the streak",
     scaleResolutionDownBy: 1.0,
     downStreak: 1,
     upStreak: 0,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   });
 
   const second = nextAdaptive(first.state, BAD_LOSS, "720p");
@@ -137,6 +215,8 @@ test("two consecutive bad samples drop the bitrate by 20% and reset the streak",
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 0,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   });
 
   const third = nextAdaptive(second.state, BAD_LOSS, "720p");
@@ -168,6 +248,8 @@ test("five consecutive good samples raise the bitrate by 10% and reset the strea
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 0,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   };
 
   for (let i = 1; i < 5; i += 1) {
@@ -188,6 +270,8 @@ test("five consecutive good samples raise the bitrate by 10% and reset the strea
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 0,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   });
 });
 
@@ -205,6 +289,8 @@ test("missing or unusable loss evidence resets both streaks", () => {
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 4,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   };
   const notGood: AdaptiveSample[] = [
     NO_EVIDENCE,
@@ -269,6 +355,7 @@ test("LAN oscillation never reduces resolution for bandwidth or loss samples", (
       const result = nextAdaptive(state, sample, "1080p");
       state = result.state;
       assert.equal(state.scaleResolutionDownBy, 1.0);
+      assert.equal(state.cpuStreak, 0, "rede nunca acumula streak de CPU");
       if (result.apply !== null) {
         assert.equal(result.apply.scaleResolutionDownBy, 1.0);
       }
@@ -280,7 +367,10 @@ test("apply is null without a change and carries both fields when present", () =
   const initial = initialAdaptiveState();
   assert.strictEqual(nextAdaptive(initial, NO_EVIDENCE, "720p").apply, null);
 
-  const cpu = nextAdaptive(initial, { qualityLimitationReason: "cpu" }, "720p");
+  // A única amostra cpu não produz apply; a segunda consecutiva é que carrega os dois campos.
+  const warming = nextAdaptive(initial, CPU, "720p");
+  assert.strictEqual(warming.apply, null);
+  const cpu = nextAdaptive(warming.state, CPU, "720p");
   assert.deepEqual(Object.keys(cpu.apply ?? {}).sort(), [
     "maxBitrateBps",
     "scaleResolutionDownBy",

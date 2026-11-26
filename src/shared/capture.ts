@@ -50,11 +50,17 @@ export type AdaptiveSample = {
   fractionLost?: number | null;
 };
 
+/** EX-001: duas amostras cpu antes de escalar; três ticks de cooldown após a recuperação. */
+export const CPU_SAMPLES_TO_SCALE = 2;
+export const CPU_SCALE_COOLDOWN_TICKS = 3;
+
 export type AdaptiveState = {
   maxBitrateBps: number;
   scaleResolutionDownBy: EncoderScale;
   downStreak: number;
   upStreak: number;
+  cpuStreak: number;
+  cpuCooldownTicks: number;
 };
 
 export type AdaptiveApply = { maxBitrateBps: number; scaleResolutionDownBy: EncoderScale };
@@ -65,13 +71,16 @@ export function initialAdaptiveState(): AdaptiveState {
     scaleResolutionDownBy: 1.0,
     downStreak: 0,
     upStreak: 0,
+    cpuStreak: 0,
+    cpuCooldownTicks: 0,
   };
 }
 
 /**
  * Histerese: 2 amostras ruins (perda > 2% ou reason "bandwidth") derrubam 20%; 5 boas (reason
  * "none" com perda < 0,5%) sobem 10%. Sem evidência de perda, nada muda. `scale` só sai de 1.0
- * com reason "cpu" — a exceção EX-001 — e volta a 1.0 em qualquer outro motivo.
+ * com 2 amostras cpu consecutivas — a exceção EX-001 — e volta a 1.0 na mesma amostra em
+ * qualquer outro motivo; a recuperação abre um cooldown para não reconfigurar o encoder em flap.
  */
 export function nextAdaptive(
   state: AdaptiveState,
@@ -82,7 +91,17 @@ export function nextAdaptive(
 
   const reason = sample.qualityLimitationReason;
   const fractionLost = typeof sample.fractionLost === "number" ? sample.fractionLost : null;
-  const scaleResolutionDownBy: EncoderScale = reason === "cpu" ? 1.5 : 1.0;
+  const cpu = reason === "cpu";
+  const cpuStreak = cpu ? state.cpuStreak + 1 : 0;
+  let cpuCooldownTicks = Math.max(0, state.cpuCooldownTicks - 1);
+  let scaleResolutionDownBy: EncoderScale = state.scaleResolutionDownBy;
+  if (!cpu) {
+    // EX-001 é restritiva: qualquer outro motivo (inclusive ausente) devolve 1.0 de imediato.
+    scaleResolutionDownBy = 1.0;
+    if (state.scaleResolutionDownBy === 1.5) cpuCooldownTicks = CPU_SCALE_COOLDOWN_TICKS;
+  } else if (cpuCooldownTicks === 0 && cpuStreak >= CPU_SAMPLES_TO_SCALE) {
+    scaleResolutionDownBy = 1.5;
+  }
   const bad = reason === "bandwidth" || (fractionLost !== null && fractionLost > 0.02);
   const good = reason === "none" && fractionLost !== null && fractionLost < 0.005;
 
@@ -99,7 +118,14 @@ export function nextAdaptive(
     upStreak = 0;
   }
 
-  const next: AdaptiveState = { maxBitrateBps, scaleResolutionDownBy, downStreak, upStreak };
+  const next: AdaptiveState = {
+    maxBitrateBps,
+    scaleResolutionDownBy,
+    downStreak,
+    upStreak,
+    cpuStreak,
+    cpuCooldownTicks,
+  };
   const changed =
     maxBitrateBps !== state.maxBitrateBps || scaleResolutionDownBy !== state.scaleResolutionDownBy;
   return { state: next, apply: changed ? { maxBitrateBps, scaleResolutionDownBy } : null };
