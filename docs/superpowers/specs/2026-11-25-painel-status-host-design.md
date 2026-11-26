@@ -147,7 +147,7 @@ componente passa por revisão de React).
   de 3 s — sem alterar critérios de sucesso, contratos ou proibições existentes.
 - `tasks/plan.md`: Task 18 na Fase 5, sem reabrir checkpoints fechados.
 - `tasks/todo.md`: ledger da Task 18 com critérios de aceite e a ressalva da cadência.
-- `CONSTRAINTS.md`: **sem mudança de regra**. Se a cobertura subir acima de 99,71%, o ratchet é
+- `CONSTRAINTS.md`: **sem mudança de regra**. Se a cobertura subir acima de 99,73%, o ratchet é
   atualizado em `package.json`, `CONSTRAINTS.md`, `tasks/todo.md` e neste doc, como na Fase 2.
 
 ## 9. Verificação e entrega

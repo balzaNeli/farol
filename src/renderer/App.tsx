@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { HostState, Quality, SourceInfo } from "../shared/ipc.ts";
+import { LiveStatus } from "./LiveStatus.tsx";
 import { createMirror, type MirrorState } from "./mirror.ts";
 import { PairPanel } from "./PairPanel.tsx";
 
@@ -87,7 +88,7 @@ export function App() {
 
   useEffect(() => {
     window.mirror.onState(setHost);
-    mirror.onChange(setState);
+    const offMirror = mirror.onChange(setState);
     window.mirror.onSignal((signal) => mirror.handleSignal(signal));
     void loadSources();
     void (async () => {
@@ -100,6 +101,7 @@ export function App() {
         setNotice(`Could not read system audio support: ${errorText(err)}`);
       }
     })();
+    return () => offMirror();
   }, [mirror]);
 
   useEffect(() => {
@@ -279,6 +281,12 @@ export function App() {
             <p className={state.status === "error" ? "status is-error" : "status"} role="status">
               {statusText}
             </p>
+            <LiveStatus
+              status={state.status}
+              quality={state.quality}
+              audio={state.audio}
+              metrics={state.metrics}
+            />
             {host?.error !== null && host?.error !== undefined && (
               <p className="message is-error" role="alert">{host.error}</p>
             )}

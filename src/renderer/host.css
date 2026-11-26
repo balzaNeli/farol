@@ -491,6 +491,27 @@ select:disabled {
   color: var(--farol-color-ink-muted-48);
 }
 
+.live-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 4px 10px;
+  margin: 2px 0 0;
+  padding-top: 7px;
+  border-top: 1px solid var(--farol-color-hairline);
+}
+
+.live-status dt {
+  color: var(--farol-color-ink-muted-48);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.live-status dd {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The preview stage is the element that should visibly grow with the window. One fluid height
    for both states keeps the layout stable when mirroring starts (no shift), and the fluid cap
    replaces the fixed 180px that made a maximized window look like a small one. */

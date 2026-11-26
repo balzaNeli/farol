@@ -181,8 +181,8 @@ pelo parceiro humano em 2026-11-25; design em
 Regras (CONSTRAINTS.md + EX-001): o painel é somente leitura e local; os números vêm do `getStats()`
 de 3 s que o Host já executa, na mesma cadência, sem timer novo. Nenhum `Signal`, nenhum
 `getStats()` no viewer, nenhuma telemetria fora da LAN e nenhuma mudança de resolução (EX-001
-intacta). `idle`, `error` e sem amostra mostram `—`. Ratchet de cobertura **inalterado nesta
-tarefa** (99,71%); só sobe na Task 4 se a cobertura aumentar.
+intacta). `idle`, `error` e sem amostra mostram `—`. Ratchet de cobertura **99,73%**
+(subido na Task 4; a cobertura real medida é 99,73%).
 
 Critérios de aceite: gate verde com ratchet atual, componente sem `role="status"` próprio, sem
 timer novo, revisões de código e React sem achados críticos.
@@ -200,9 +200,8 @@ timer novo, revisões de código e React sem achados críticos.
 - [ ] Nenhum valor fabricado antes da primeira amostra; bitrate `—` sem tráfego real
 
 ## Etapa 3 — Verificação e entrega
-- [ ] `npm run verify` verde com o ratchet atual (99,71%)
+- [ ] `npm run verify` verde com o ratchet atual (99,73%)
 - [ ] `npx tsc -p tsconfig.json` limpo e `git diff --check` sem whitespace errors
 - [ ] Revisões de código e React sem achados críticos
 - [ ] Commit `docs(fase2): especificar painel de status ao vivo no host` com `--no-gpg-sign`
-- [ ] Se a cobertura subir na Task 4, atualizar o ratchet em `package.json`, `CONSTRAINTS.md`,
-      neste ledger e no design doc (não nesta tarefa)
+- [x] Ratchet subido em `package.json`, `CONSTRAINTS.md`, neste ledger e no design doc na Task 4

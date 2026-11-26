@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-25 (Fase 2: piso de cobertura subido para 99,71%)
+Last reviewed: 2026-11-25 (Fase 2: piso de cobertura subido para 99,73% na Task 18)
 
 ## Floor (always enforced, no setup required)
 
@@ -16,7 +16,7 @@ Last reviewed: 2026-11-25 (Fase 2: piso de cobertura subido para 99,71%)
 |-----------|------|-----------|---------|
 | Types | Zero type errors | `npx tsc -p tsconfig.json` | every edit |
 | Lint | Zero warnings/errors | `npm run lint` (`eslint . --max-warnings 0`) | every edit |
-| Coverage | Pure-module coverage ≥ 99.71% (ratchet; raise the floor percentage when coverage rises) | `npm run coverage` | task end |
+| Coverage | Pure-module coverage ≥ 99.73% (ratchet; raise the floor percentage when coverage rises) | `npm run coverage` | task end |
 | Security: code | No STUN/TURN servers; viewer receive-only | `npm run check:gates` | task end |
 | Security: architecture | `RTC_CONFIG.iceServers` empty & frozen; viewer has no capture APIs; host on `file://`; `/ws` relays `Signal` frames verbatim, never parses SDP | `npm run check:gates` | task end |
 | `npm run verify` | All checks green: lint + test + coverage + build + gates | `npm run verify` | before commit |
@@ -25,7 +25,7 @@ Last reviewed: 2026-11-25 (Fase 2: piso de cobertura subido para 99,71%)
 
 | Metric | Today | Direction |
 |--------|-------|-----------|
-| Pure-module coverage | 99.71% | must not fall (update floor if `npm run coverage` rises) |
+| Pure-module coverage | 99.73% | must not fall (update floor if `npm run coverage` rises) |
 | (Performance budgets) | not yet measured | Lighthouse needs a running URL (Fire TV / preview) |
 | (Accessibility) | not yet measured | needs WCAG rules written first |
 
