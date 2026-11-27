@@ -4,7 +4,9 @@ import { parseSignal } from "../shared/protocol.ts";
 import { RTC_CONFIG } from "../shared/rtc.ts";
 import {
   connectionReducer,
+  failureEvent,
   initialConnection,
+  MAX_ICE_RESTARTS,
   type ConnectionEvent,
   type ConnectionState,
 } from "./connection.ts";
@@ -96,6 +98,9 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
 
   useEffect(() => {
     if (connection.phase === "lost") reconnectRef.current?.focus();
+    else if (connection.phase === "connected" || connection.phase === "reconnecting") {
+      muteRef.current?.focus();
+    }
   }, [connection.phase]);
 
   useEffect(() => {
@@ -126,8 +131,10 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     let remoteReady = false;
     let statsTimer: number | null = null;
     let reconnectTimer: number | null = null;
+    // Um restart concedido ainda não chegou a "checking": qualquer novo `failed` nesta janela
+    // é duplicata do outro handler, não uma segunda queda.
+    let restartPending = false;
     let firstMediaTimer: number | null = null;
-    let iceFailureHandled = false;
     let previousVideo: { bytes: number; timestamp: number } | null = null;
     const pendingIce: RTCIceCandidateInit[] = [];
     // Serializa ofertas concorrentes: cada oferta espera a anterior terminar antes de
@@ -146,7 +153,11 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
       if (finished) return;
       finished = true;
       if (statsTimer !== null) window.clearInterval(statsTimer);
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (firstMediaTimer !== null) {
+        window.clearTimeout(firstMediaTimer);
+        firstMediaTimer = null;
+      }
+      clearRetry();
       socket.onclose = null;
       socket.close();
       peer.close();
@@ -161,35 +172,46 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
       return next;
     }
 
-    function handleConnected(): void {
-      if (finished || disposed) return;
-      iceFailureHandled = false;
+    /** Fecha a janela de retry: nenhum timeout ou flag sobrevive a um estado terminal. */
+    function clearRetry(): void {
+      restartPending = false;
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-      transition("connected");
     }
 
-    // Exactly one ICE restart per failure; the host offerer answers with the matching restarted
-    // offer. A genuine second failure (after the restart reaches checking) leaves the reconnect
-    // screen, while the duplicate failed event from the other state handler is ignored.
+    function handleConnected(): void {
+      if (finished || disposed) return;
+      clearRetry();
+      transition("connected");
+      setStatus("Connected");
+    }
+
+    // Up to two ICE restarts per episode; the host offerer answers with the matching restarted
+    // offer. A `failed` while a restart is still pending is the duplicate from the other state
+    // handler, not a new drop — it must not spend the second restart. `checking` re-arms the gate.
     function handleFailure(): void {
       if (finished || disposed) return;
       const before = connectionRef.current;
-      if (before.phase === "reconnecting" && iceFailureHandled) return;
-      const next = transition("failed");
-      if (next.phase !== "reconnecting" || before.restarts !== 0) return;
-      iceFailureHandled = true;
+      const next = transition(failureEvent(restartPending));
+      if (next.phase !== "reconnecting" || next.restarts === before.restarts) {
+        if (next.phase === "lost") clearRetry();
+        return;
+      }
+      clearRetry();
+      restartPending = true;
       try {
         peer.restartIce();
       } catch {
         transition("timeout");
+        clearRetry();
         return;
       }
-      setStatus("Reconnecting...");
+      setStatus(`Reconnecting... (${next.restarts}/${MAX_ICE_RESTARTS})`);
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
+        restartPending = false;
         transition("timeout");
       }, RECONNECT_TIMEOUT_MS);
     }
@@ -270,7 +292,11 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     };
 
     peer.oniceconnectionstatechange = () => {
-      if (peer.iceConnectionState === "checking") iceFailureHandled = false;
+      if (finished || disposed) return;
+      if (peer.iceConnectionState === "checking") {
+        restartPending = false;
+        transition("checking");
+      }
       if (peer.iceConnectionState === "failed") handleFailure();
       if (peer.iceConnectionState === "connected" || peer.iceConnectionState === "completed") {
         handleConnected();
@@ -278,10 +304,8 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     };
 
     peer.onconnectionstatechange = () => {
-      if (peer.connectionState === "connected") {
-        handleConnected();
-        setStatus("Connected");
-      }
+      if (finished || disposed) return;
+      if (peer.connectionState === "connected") handleConnected();
       if (
         peer.connectionState === "failed" &&
         peer.iceConnectionState !== "failed" &&
@@ -372,7 +396,8 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
       disposed = true;
       finishRef.current = () => undefined;
       if (statsTimer !== null) window.clearInterval(statsTimer);
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (firstMediaTimer !== null) window.clearTimeout(firstMediaTimer);
+      clearRetry();
       socket.onclose = null;
       socket.close();
       peer.close();
@@ -381,7 +406,7 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     };
   }, [token, debug, onEnded]);
 
-  async function toggleMute(): Promise<void> {
+  const toggleMute = useCallback(async (): Promise<void> => {
     const video = videoRef.current;
     if (video === null) return;
     if (!muted) {
@@ -405,7 +430,7 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
       setNeedsSound(true);
       showControls();
     }
-  }
+  }, [muted, showControls]);
 
   async function toggleFullscreen(): Promise<void> {
     try {
@@ -437,7 +462,7 @@ export function Watch({ token, debug, onEnded }: WatchProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [muted, showControls]);
+  }, [toggleMute, showControls]);
 
   function stopWatching(): void {
     const socket = socketRef.current;
@@ -470,13 +495,15 @@ audio  ${stats.audio === null ? "n/a" : `${Math.round(stats.audio * 100)}%`}`}
 
       {connection.phase === "reconnecting" && (
         <div className="watch-reconnect" role="status">
-          <p>Connection lost. Reconnecting...</p>
+          <p>
+            Connection lost. Reconnecting... ({connection.restarts}/{MAX_ICE_RESTARTS})
+          </p>
         </div>
       )}
 
       {connection.phase === "lost" && (
-        <div className="watch-reconnect" role="alert">
-          <p>The connection was lost.</p>
+        <div className="watch-reconnect">
+          <p role="alert">The connection was lost.</p>
           <button
             ref={reconnectRef}
             type="button"

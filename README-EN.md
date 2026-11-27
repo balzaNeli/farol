@@ -74,14 +74,20 @@ npm start            # Electron host: capture, LAN URLs, PIN and QR
 npm run serve        # LAN server on :4680 (PORT=4681 to change), prints the PIN
 ```
 
-The host window shows the QR, the LAN URLs and the PIN. Scan the QR with a phone, or open the URL
-on the Fire TV and enter the PIN. `http://<lan-ip>:4680/probe` is the hardware probe; it runs its
-safe checks (1–4) from a single button. `npm run serve` runs the viewer and API without capture
-(the PIN is printed in the terminal), for protocol checks.
+The host window shows the QR, the LAN URLs and the PIN. When the mDNS responder is up, the first
+URL in the window is `http://farol.local:4680/` — the name follows the PC's current IP, so a
+router-side IP change needs no new typing on the Fire TV; the direct-IP addresses stay right
+below as fallback, and the QR keeps pointing at the direct IP (it works even if UDP 5353 is
+blocked). If mDNS is inactive (a warning in `npm run serve`, or the name line missing from the
+host window), just use the IP addresses as before. `http://<lan-ip>:4680/probe` is the hardware
+probe; it runs its safe checks (1–4) from a single button. `npm run serve` runs the viewer and API
+without capture (the PIN is printed in the terminal), for protocol checks.
 
 ### Fire TV (first time)
 
-1. On the Fire TV, open Silk and type the LAN URL the host shows (`http://<lan-ip>:4680/`).
+1. On the Fire TV, open Silk and type the URL the host shows — preferably the name
+   `http://farol.local:4680/`, which stays valid when the PC's IP changes. If the name does not
+   open, use the direct-IP URL (`http://<lan-ip>:4680/`).
 2. Bookmark that page in Silk. The exact menu label varies by Fire OS and Silk version.
 3. Then open the bookmark and enter the six-digit PIN; the sixth digit submits. The QR code is for
    phones/tablets, not for the TV remote.
@@ -188,6 +194,8 @@ where it breaks:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Nothing loads on the TV | Windows Firewall blocked the app, or the devices are on different networks | Allow the app (Electron, or Node for `npm run serve`) on **Private** networks when Windows asks; if the prompt was dismissed, add an inbound rule for the app and the printed port (4680 by default). Use the exact LAN URL the host prints; a Public network profile blocks it |
+| `farol.local` does not open on the TV, but the direct IP works | The firewall blocked UDP 5353 (the firewall prompt covers TCP and UDP), the router blocks multicast (AP/client isolation), or another mDNS responder took the port | Use the bookmarked direct-IP URL — it never depends on multicast. To get the name back: allow the app on UDP 5353 for Private networks too, put both devices on the same SSID without AP isolation, and check that `npm run serve` prints the "by name" line (the server coexists with the Windows/Bonjour mDNS responder and falls back to IP with a warning when it cannot) |
+| The bookmark opens the **wrong PC's** pairing page | Another computer on the same network also runs Farol, and both answer `farol.local` | Differentiate by IP: each instance prints its own addresses — bookmark the direct-IP URL of the right machine. Name-conflict resolution (RFC 6762 section 9) is out of scope for v1 |
 | The page loads but the stream never starts, or it freezes after a few seconds | AP/client isolation, guest network, VPN on the host, or a router that blocks peer-to-peer | Put both devices on the same non-guest SSID, disable the host VPN, and check the router's client-isolation setting. The host disables Chromium's mDNS candidate hiding so its candidates are real LAN IPs, but a router that blocks multicast or a viewer that only offers `.local` can still fail; there is no TURN fallback by design |
 | Silk shows a blank page, black video or misplaced controls | Silk's accelerated rendering on some Fire TV models | Turn off accelerated rendering in Silk's settings (the menu label varies by Fire OS version), reload the viewer, and try `/probe` to confirm WebRTC |
 | Video plays but there is no sound | The browser/TV blocked unmuted autoplay | The video stays playing muted. Focus **Press OK for sound** and press OK/Enter, or tap it on a phone. On iOS, one tap |

@@ -5,11 +5,12 @@
 Mirror the host PC's screen + system audio to a Fire TV (Silk browser) and phones/tablets over
 the LAN, with no cloud, no install on the viewer and no traffic off the network. Built as an
 Electron host (capture + embedded HTTP/WS server + pairing) and a React viewer served from that
-same server. 14 tasks across 4 phases, with 4 verification checkpoints. The Fire TV is the
+same server. 18 tasks across 5 phases, with 4 verification checkpoints. The Fire TV is the
 device we cannot test from here, so the plan puts a probe on real hardware before any viewer UI
 exists.
 
-Source of truth for behaviour: `SPEC.md` (rev 5, approved — transport decided by probe evidence).
+Source of truth for behaviour: `SPEC.md` (rev 8, approved — transport decided by probe evidence,
+plus Fase 2 adaptive bitrate, two ICE restarts and the live host status line).
 
 ## Architecture decisions
 
@@ -89,6 +90,25 @@ but is not locked at 30 fps yet (tuning follow-up); no fps/`lost` numbers record
 - [x] Task 12: Viewer polish: autoplay-tap, mute/fullscreen/hotkeys, ICE-restart reconnect
 - [x] Task 13: Security pass, README and troubleshooting (Silk accelerated mode, firewall, mDNS)
 - [ ] Task 14: Coverage ≥ 90% on the four pure modules, `npm run verify` gate, full acceptance run
+- [x] Task 15: mDNS `farol.local` responder — pure DNS codec in `src/shared/mdns.ts` (coverage
+      ratchet) + `node:dgram` glue in `src/server/mdns.ts`, best-effort (HTTP never fails on it),
+      attached to `startServer` via an explicit `mdns` option at both entry points, Host UI shows
+      `http://farol.local:<port>/` first with IP fallback below, README/SPEC notes (rev 6).
+      Code, tests and docs done and reviewed (fresh-context review, fixes applied); still pending
+      a manual check on the Fire TV that Silk resolves `.local` — direct-IP fallback covers it.
+
+### Phase 5 — Resiliência de rede e qualidade adaptativa (Fase 2 das otimizações)
+- [x] Task 16: bitrate adaptativo no host e válvula EX-001 corrigida (`src/shared/capture.ts`,
+      `src/shared/rtc.ts`, `src/renderer/mirror.ts`, `tests/adaptive.test.ts`,
+      `tests/mirror.test.ts`)
+- [x] Task 17: segundo ICE restart no viewer e no host (`src/viewer/connection.ts`,
+      `src/viewer/Watch.tsx`, `src/renderer/mirror.ts`, `tests/reconnect.test.ts`)
+- [x] Checkpoint 5: `npm run verify` + `npx tsc -p tsconfig.json`, revisão fresh-context
+      (correções e re-revisão registradas em `tasks/todo.md`)
+- [ ] Medição manual na Fire TV (oscilação de LAN mantém 1080p; 2 restarts; 3ª queda → PIN pad),
+      pendência explícita em `docs/manual-tests.md`
+- [x] Task 18: Painel de status ao vivo no Host: `readSendMetrics` puro,
+      `MirrorState.metrics`/`quality`, `LiveStatus` no `.status-area`, unsubscribe de `onChange`.
 
 ### Checkpoint: Complete
 - [ ] Every success criterion in `SPEC.md` verified, with Fire TV items logged in

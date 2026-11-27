@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { createSocket, type Socket } from "node:dgram";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -232,7 +233,7 @@ test("POST /api/pair: wrong PIN, three strikes, lockout, and the PIN is never ec
   // The right PIN does not open a locked door either, and the refusal costs no attempt.
   assert.equal((await pair(pin)).status, 429);
 
-  clock += 60_000; // the lockout expires, and a fresh PIN is on screen with it
+  clock += 120_000; // lockout global expira (60 s) e o backoff per-IP também (120 s)
   const fresh = pairing.status();
   assert.equal(fresh.lockedUntilMs, 0);
   assert.notEqual(fresh.pin, pin);
@@ -320,4 +321,58 @@ test("POST /api/pair: malformed bodies are 400 and are never counted as attempts
   });
   assert.equal(attempt.status, 401);
   assert.deepEqual(await attempt.json(), { error: "invalid_pin", attemptsLeft: 2 });
+});
+
+test("the mDNS responder is opt-in and closes with the server", async (t) => {
+  // Needs a machine with a joinable multicast interface (any normal LAN machine): on a box with
+  // no network at all the responder would be inactive and this would fail — mdns.test.ts covers
+  // that path machine-independently.
+  const { root, ...roots } = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const server = await startServer({ port: 0, host: "127.0.0.1", ...roots, mdns: { port: 0 } });
+  assert.equal(server.mdns, true);
+  await server.close(); // must not hang on the responder's UDP socket
+  // The flag must be live: a responder that died (or was closed) cannot keep the UI advertising
+  // a name that no longer resolves.
+  assert.equal(server.mdns, false);
+});
+
+test("mDNS stays off unless the caller asks for it", async (t) => {
+  const { root, ...roots } = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const server = await startServer({ port: 0, host: "127.0.0.1", ...roots });
+  t.after(async () => {
+    await server.close();
+  });
+  assert.equal(server.mdns, false);
+});
+
+test("an mDNS failure never takes the LAN server down", async (t) => {
+  const { root, ...roots } = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const holder = await new Promise<Socket>((resolve, reject) => {
+    const socket = createSocket({ type: "udp4" }); // no reuseAddr: binds exclusively on Windows
+    socket.once("error", reject);
+    socket.bind(0, "127.0.0.1", () => resolve(socket));
+  });
+  t.after(async () => {
+    await new Promise<void>((resolve) => holder.close(() => resolve()));
+  });
+
+  const server = await startServer({
+    port: 0,
+    host: "127.0.0.1",
+    ...roots,
+    mdns: { port: holder.address().port, address: "127.0.0.1", warn: () => undefined },
+  });
+  t.after(async () => {
+    await server.close();
+  });
+  assert.equal(server.mdns, false, "the responder gave up, but the server must not");
+
+  const info = await fetch(`http://127.0.0.1:${server.port}/api/info`);
+  assert.equal(info.status, 200);
 });

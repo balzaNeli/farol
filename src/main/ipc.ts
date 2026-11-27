@@ -1,8 +1,9 @@
-import { desktopCapturer, ipcMain } from "electron";
+import { ipcMain } from "electron";
 
 import { audioModeFor } from "../shared/audio.ts";
 import { parseStartRequest, type SourceInfo } from "../shared/ipc.ts";
 import { parseSignal, type Signal } from "../shared/protocol.ts";
+import { listSourcesCached } from "./sources-cache.ts";
 import type { CaptureSelection } from "./display-media.ts";
 
 export type IpcOptions = {
@@ -26,10 +27,7 @@ export function registerIpc(options: IpcOptions): void {
   const audioSupported = (): boolean => audioModeFor(process.platform) !== null;
 
   ipcMain.handle("mirror:listSources", async (): Promise<SourceInfo[]> => {
-    const sources = await desktopCapturer.getSources({
-      types: ["screen", "window"],
-      thumbnailSize: { width: 0, height: 0 },
-    });
+    const sources = await listSourcesCached();
     return sources.map((source) => ({
       id: source.id,
       name: source.name,

@@ -36,6 +36,8 @@ let quitting = false;
 let qrDataUrl = "";
 let qrPayload = "";
 let qrError: string | null = null;
+let qrVersion = 0;
+let lastQrDataUrl = "";
 
 /** Main renders the QR; regenerate when the address or PIN changes and never show the old one. */
 function refreshQr(base: string | null, pin: string): void {
@@ -64,18 +66,27 @@ function hostState(): HostState {
   const port = server?.port;
   const urls =
     port === undefined ? [] : lanAddresses().map((address) => `http://${address}:${port}/`);
+  const mdnsUrl =
+    port === undefined || server?.mdns !== true ? null : `http://farol.local:${port}/`;
   const pin = status?.pin ?? "";
   const primaryAddress = port === undefined ? null : preferredLanAddress();
   const primary = primaryAddress === null ? null : `http://${primaryAddress}:${port}/`;
   refreshQr(primary, pin);
+  const qrChanged = qrDataUrl !== lastQrDataUrl;
+  if (qrChanged) {
+    qrVersion += 1;
+    lastQrDataUrl = qrDataUrl;
+  }
   const noLan =
     port !== undefined && urls.length === 0
       ? "No LAN address found. Connect this computer to Wi-Fi or Ethernet."
       : null;
   return {
     urls,
+    mdnsUrl,
     pin,
-    qrDataUrl,
+    qrDataUrl: qrChanged ? qrDataUrl : null,
+    qrVersion,
     expiresAt: status?.expiresAtMs ?? 0,
     viewer: viewer === null ? null : { userAgent: viewer.userAgent },
     audio: capture.get()?.audio ?? false,
@@ -118,7 +129,7 @@ function sendToViewer(signal: Signal): void {
   }
 }
 
-/** display-capture for the host page; every other permission is denied. */
+/** display-capture and the pairing card's clipboard writes for the host page; all else denied. */
 function installPermissions(hostContentsId: number): void {
   const isHost = (contents: WebContents | null): boolean =>
     contents !== null && contents.id === hostContentsId;
@@ -126,16 +137,44 @@ function installPermissions(hostContentsId: number): void {
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
     // Electron reports getDisplayMedia as a "media" request, not "display-capture". Allow it only
     // for the host page and only while a source is armed; the display-media handler below is what
-    // actually authorizes the capture. Any other media request (camera, mic) stays denied.
+    // actually authorizes the capture. clipboard-sanitized-write backs the pairing card's Copy
+    // buttons (navigator.clipboard.writeText). Any other media request (camera, mic) stays denied.
     const allowed =
-      permission === "display-capture"
-        ? isHost(contents)
-        : permission === "media" && isHost(contents) && capture.get() !== null;
+      (permission === "display-capture" && isHost(contents)) ||
+      (permission === "media" && isHost(contents) && capture.get() !== null) ||
+      (permission === "clipboard-sanitized-write" && isHost(contents));
     callback(allowed);
   });
   session.defaultSession.setPermissionCheckHandler((contents, permission) => {
-    return permission === "display-capture" && isHost(contents);
+    return (
+      (permission === "display-capture" || permission === "clipboard-sanitized-write") &&
+      isHost(contents)
+    );
   });
+}
+
+/**
+ * Content-scale steps: on large windows the whole UI grows (fonts, cards, preview) instead of
+ * leaving the fixed-width layout centered in empty space. Quantized, so the layout does not
+ * "breathe" while the window edge is dragged; `webContents.setZoomFactor` is the Chromium page
+ * zoom, which keeps media queries and viewport units consistent with the applied scale. The
+ * default 980x760 window stays at 1.0, untouched.
+ */
+const ZOOM_STEPS: Array<{ minWidth: number; factor: number }> = [
+  { minWidth: 1700, factor: 1.3 },
+  { minWidth: 1400, factor: 1.15 },
+  { minWidth: 0, factor: 1 },
+];
+let appliedZoomFactor = 0;
+
+function applyContentScale(win: BrowserWindow): void {
+  const width = win.getContentSize()[0] ?? 0;
+  const step = ZOOM_STEPS.find((entry) => width >= entry.minWidth);
+  const factor = step === undefined ? 1 : step.factor;
+  if (factor !== appliedZoomFactor) {
+    appliedZoomFactor = factor;
+    win.webContents.setZoomFactor(factor);
+  }
 }
 
 function createWindow(): BrowserWindow {
@@ -157,6 +196,8 @@ function createWindow(): BrowserWindow {
   });
 
   win.once("ready-to-show", () => win.show());
+  win.webContents.once("did-finish-load", () => applyContentScale(win));
+  win.on("resize", () => applyContentScale(win));
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.on("closed", () => {
@@ -177,7 +218,7 @@ async function start(): Promise<void> {
 
   try {
     pairing = createPairing();
-    server = await startServer({ pairing });
+    server = await startServer({ pairing, mdns: { hostname: "farol.local" } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     dialog.showErrorBox("Farol", `Could not start the LAN server: ${message}`);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { HostState } from "../shared/ipc.ts";
 
@@ -7,18 +7,23 @@ export function PairPanel({ state }: { state: HostState | null }) {
   const [now, setNow] = useState(() => Date.now());
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  // Mantém o último QR data URL recebido; quando o main envia null (não mudou), reusa o anterior.
+  const qrRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 250);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   const pin = state?.pin ?? "";
   const urls = state?.urls ?? [];
+  const mdnsUrl = state?.mdnsUrl ?? null;
   const expiresAt = state?.expiresAt ?? 0;
   const seconds =
     pin === "" || expiresAt === 0 ? 0 : Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const expired = pin !== "" && seconds === 0;
+  const qrDataUrl = state?.qrDataUrl ?? qrRef.current;
+  if (state?.qrDataUrl != null) qrRef.current = state.qrDataUrl;
 
   async function copyUrl(url: string): Promise<void> {
     setCopyError(null);
@@ -47,10 +52,10 @@ export function PairPanel({ state }: { state: HostState | null }) {
       </div>
 
       <div className="qr-block">
-        {state?.qrDataUrl ? (
+        {qrDataUrl ? (
           <img
             className="qr-image"
-            src={state.qrDataUrl}
+            src={qrDataUrl}
             alt="QR code for the viewer URL"
             width={320}
             height={320}
@@ -70,18 +75,31 @@ export function PairPanel({ state }: { state: HostState | null }) {
         {urls.length === 0 ? (
           <p className="muted">Waiting for a LAN address...</p>
         ) : (
-          urls.map((url) => (
-            <div className="url-row" key={url}>
-              <code className="url">{url}</code>
-              <button className="copy-button" type="button" onClick={() => void copyUrl(url)}>
-                {copiedUrl === url ? "Copied" : "Copy"}
-              </button>
-            </div>
-          ))
+          <>
+            {mdnsUrl !== null && (
+              <div className="url-row" key={mdnsUrl}>
+                <code className="url">{mdnsUrl}</code>
+                <button className="copy-button" type="button" onClick={() => void copyUrl(mdnsUrl)}>
+                  {copiedUrl === mdnsUrl ? "Copied" : "Copy"}
+                </button>
+              </div>
+            )}
+            {urls.map((url) => (
+              <div className="url-row" key={url}>
+                <code className="url">{url}</code>
+                <button className="copy-button" type="button" onClick={() => void copyUrl(url)}>
+                  {copiedUrl === url ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ))}
+          </>
         )}
         {copyError !== null && <span className="copy-feedback is-error" role="status">{copyError}</span>}
         {copiedUrl !== null && <span className="copy-feedback" role="status">Address copied.</span>}
-        {urls.length > 1 && <span className="hint">The QR uses the first address.</span>}
+        {mdnsUrl !== null && (
+          <span className="hint">The name follows this PC's IP - nothing to type again after a router change.</span>
+        )}
+        {urls.length > 1 && <span className="hint">The QR uses the first IP address.</span>}
         {state?.viewer !== null && state?.viewer !== undefined && (
           <span className="hint">A viewer is connected. Pairing is paused until it leaves.</span>
         )}
