@@ -1,6 +1,6 @@
 import { canRestartIce, MAX_ICE_RESTARTS } from "../shared/rtc.ts";
 
-export { canRestartIce, MAX_ICE_RESTARTS };
+export { MAX_ICE_RESTARTS };
 
 export type ConnectionPhase = "connecting" | "connected" | "reconnecting" | "lost";
 

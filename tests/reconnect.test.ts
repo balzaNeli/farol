@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { canRestartIce } from "../src/shared/rtc.ts";
 import {
-  canRestartIce,
   connectionReducer,
   failureEvent,
   initialConnection,
